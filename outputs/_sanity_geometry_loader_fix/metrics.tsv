@@ -1,0 +1,2 @@
+metric	layer	timestep	value	extra
+nc1	0	0.5	0.0	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=1;val_k=1;ncm=cosine

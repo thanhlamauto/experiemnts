@@ -1,0 +1,2 @@
+backend	ckpt	metric	layer	noise_level	model_t	value	num_images	path_type	noise_protocol
+sit	/workspace/SiT/pretrained_models/SiT-XL-2-256x256.pt	patch_miou	0	1.00000000	0.00000000	0.25390625	1	linear	fixed_per_image

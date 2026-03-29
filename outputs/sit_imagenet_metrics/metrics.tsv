@@ -1,0 +1,421 @@
+metric	layer	timestep	value	extra
+mad	0	0.5	9.65220827102661	
+mad	1	0.5	10.229708766937256	
+mad	2	0.5	10.773950386047364	
+mad	3	0.5	10.524409427642823	
+mad	4	0.5	10.176587505340576	
+mad	5	0.5	10.812484874725342	
+mad	6	0.5	8.453568286895752	
+mad	7	0.5	9.92914867401123	
+mad	8	0.5	9.04160436630249	
+mad	9	0.5	9.885096664428712	
+mad	10	0.5	9.427572135925294	
+mad	11	0.5	8.022203016281129	
+mad	12	0.5	10.009191913604736	
+mad	13	0.5	5.864495315551758	
+mad	14	0.5	6.348821239471436	
+mad	15	0.5	7.339847841262817	
+mad	16	0.5	5.3109766864776615	
+mad	17	0.5	5.288585472106933	
+mad	18	0.5	7.349600973129273	
+mad	19	0.5	7.126511945724488	
+mad	20	0.5	6.1127965545654295	
+mad	21	0.5	5.4540320491790775	
+mad	22	0.5	4.868942842483521	
+mad	23	0.5	6.077237224578858	
+mad	24	0.5	5.191764221191407	
+mad	25	0.5	5.251881856918335	
+mad	26	0.5	4.694191026687622	
+mad	27	0.5	6.1752244663238525	
+entropy	0	0.5	5.12868405342102	
+entropy	1	0.5	4.88885766029358	
+entropy	2	0.5	4.695897607803345	
+entropy	3	0.5	4.574377746582031	
+entropy	4	0.5	3.8060018539428713	
+entropy	5	0.5	4.277506237030029	
+entropy	6	0.5	4.296795663833619	
+entropy	7	0.5	5.1002832126617434	
+entropy	8	0.5	4.449804964065552	
+entropy	9	0.5	4.549291677474976	
+entropy	10	0.5	4.661723852157593	
+entropy	11	0.5	4.053029708862304	
+entropy	12	0.5	4.624314937591553	
+entropy	13	0.5	2.813072280883789	
+entropy	14	0.5	3.845920467376709	
+entropy	15	0.5	4.459021759033203	
+entropy	16	0.5	2.5895399951934817	
+entropy	17	0.5	2.9223202228546143	
+entropy	18	0.5	4.018693084716797	
+entropy	19	0.5	4.247334594726563	
+entropy	20	0.5	3.8456431150436403	
+entropy	21	0.5	3.380898299217224	
+entropy	22	0.5	3.353490266799927	
+entropy	23	0.5	3.9998119115829467	
+entropy	24	0.5	3.24120222568512	
+entropy	25	0.5	3.4721340990066527	
+entropy	26	0.5	3.1040860271453856	
+entropy	27	0.5	3.6429702329635623	
+decay_slope	0	0.5	-0.0009722068852715893	
+decay_slope	1	0.5	-0.003364610872231424	
+decay_slope	2	0.5	-0.0033022301318123936	
+decay_slope	3	0.5	-0.00385438880417496	
+decay_slope	4	0.5	-0.003818761855363846	
+decay_slope	5	0.5	-0.003870053035207093	
+decay_slope	6	0.5	-0.003407261517131701	
+decay_slope	7	0.5	-0.0033018998918123545	
+decay_slope	8	0.5	-0.0032172142644412817	
+decay_slope	9	0.5	-0.0012173061718931421	
+decay_slope	10	0.5	-0.001093296438921243	
+decay_slope	11	0.5	-0.0009758128150133416	
+decay_slope	12	0.5	-0.0010115637467242777	
+decay_slope	13	0.5	-0.000659446245408617	
+decay_slope	14	0.5	-0.0004891573335044086	
+decay_slope	15	0.5	-0.00041267950291512534	
+decay_slope	16	0.5	-0.00043026219689636493	
+decay_slope	17	0.5	-0.0003092962502705632	
+decay_slope	18	0.5	-0.0002559333448698453	
+decay_slope	19	0.5	-0.00019954788167524386	
+decay_slope	20	0.5	-0.00042883839691057804	
+decay_slope	21	0.5	-0.00048663807014236225	
+decay_slope	22	0.5	-0.0011066878482233733	
+decay_slope	23	0.5	-0.0010760281700640916	
+decay_slope	24	0.5	-0.0012066716316621751	
+decay_slope	25	0.5	-0.001067173607298173	
+decay_slope	26	0.5	-0.001223019399913028	
+decay_slope	27	0.5	-0.001618343735462986	
+hf_ratio	0	0.5	0.0010754803998861463	
+hf_ratio	1	0.5	0.0007945401186589152	
+hf_ratio	2	0.5	0.0007640848332084716	
+hf_ratio	3	0.5	0.0005479009775444866	
+hf_ratio	4	0.5	0.0008788600016850978	
+hf_ratio	5	0.5	0.0029504908807575702	
+hf_ratio	6	0.5	0.0026151507953181864	
+hf_ratio	7	0.5	0.002519542642403394	
+hf_ratio	8	0.5	0.0024559426796622575	
+hf_ratio	9	0.5	0.0017394486395642162	
+hf_ratio	10	0.5	0.0015851708338595928	
+hf_ratio	11	0.5	0.0009377756749745458	
+hf_ratio	12	0.5	0.00038248777913395314	
+hf_ratio	13	0.5	0.009001255463808776	
+hf_ratio	14	0.5	0.008632092382758857	
+hf_ratio	15	0.5	0.0013398506434168667	
+hf_ratio	16	0.5	0.0036803631810471416	
+hf_ratio	17	0.5	0.007700025839731097	
+hf_ratio	18	0.5	0.009125316897407174	
+hf_ratio	19	0.5	0.005738083031028509	
+hf_ratio	20	0.5	0.005109654376283288	
+hf_ratio	21	0.5	0.0022992563364095985	
+hf_ratio	22	0.5	0.008031278615817428	
+hf_ratio	23	0.5	0.004588106786832214	
+hf_ratio	24	0.5	0.003990455679595471	
+hf_ratio	25	0.5	0.0007846450712531805	
+hf_ratio	26	0.5	0.00223162975627929	
+hf_ratio	27	0.5	0.0003407601654180326	
+nc1	0	0.5	2.6390192435969064	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	1	0.5	1.6756647027254459	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	2	0.5	1.7237974357690773	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	3	0.5	1.7056351463126336	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	4	0.5	1.8164008958785054	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	5	0.5	2.1797653565413557	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	6	0.5	2.527715966510291	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	7	0.5	2.521768032285978	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	8	0.5	2.5084746524030934	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	9	0.5	2.531945120834106	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	10	0.5	2.4970850202724417	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	11	0.5	2.4643628191456326	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	12	0.5	2.409672726966403	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	13	0.5	2.733745977417235	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	14	0.5	2.75378284311775	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	15	0.5	2.591992695391538	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	16	0.5	2.64852281633	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	17	0.5	2.8013945259358737	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	18	0.5	2.684315810745854	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	19	0.5	2.521141073707011	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	20	0.5	2.453964598702338	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	21	0.5	2.2785619484418187	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	22	0.5	2.904705136554982	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	23	0.5	2.813335779218786	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	24	0.5	2.8516332835723546	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	25	0.5	2.84736494586361	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	26	0.5	2.966459459593965	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+nc1	27	0.5	3.173469453858339	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	0	0.5	0.39609375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	1	0.5	0.78671875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	2	0.5	0.8046875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	3	0.5	0.79453125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	4	0.5	0.7203125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	5	0.5	0.4609375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	6	0.5	0.32734375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	7	0.5	0.2875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	8	0.5	0.30234375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	9	0.5	0.3328125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	10	0.5	0.35546875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	11	0.5	0.3734375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	12	0.5	0.39453125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	13	0.5	0.3546875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	14	0.5	0.35703125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	15	0.5	0.371875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	16	0.5	0.37265625	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	17	0.5	0.38359375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	18	0.5	0.434375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	19	0.5	0.528125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	20	0.5	0.58984375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	21	0.5	0.53359375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	22	0.5	0.39609375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	23	0.5	0.309375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	24	0.5	0.32734375	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	25	0.5	0.34296875	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	26	0.5	0.403125	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+ncm_acc	27	0.5	0.35625	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	0	0.5	17.591207823381787	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	1	0.5	10.25978490006164	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	2	0.5	9.744917560719486	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	3	0.5	10.998343019655758	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	4	0.5	12.875717228505616	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	5	0.5	16.83939749620944	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	6	0.5	20.05273393391689	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	7	0.5	21.541133787247613	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	8	0.5	21.05919321751027	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	9	0.5	19.675792127095118	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	10	0.5	19.103672637651663	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	11	0.5	18.69042871907141	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	12	0.5	18.152230605115914	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	13	0.5	19.4711060792594	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	14	0.5	23.149950955374976	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	15	0.5	18.409187729529712	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	16	0.5	18.33976044484922	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	17	0.5	18.521674714167812	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	18	0.5	18.803240138500364	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	19	0.5	15.799341073955404	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	20	0.5	14.337332478559784	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	21	0.5	17.13305154008098	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	22	0.5	17.319001554357246	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	23	0.5	19.619593467541836	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	24	0.5	18.52026972966679	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	25	0.5	17.796572852744365	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	26	0.5	17.016705043461585	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+etf_dev	27	0.5	18.48664300120134	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	0	0.5	4.181256462869936	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	1	0.5	9.729584801604435	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	2	0.5	11.404376597750268	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	3	0.5	11.464679216209253	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	4	0.5	9.974007275967137	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	5	0.5	5.8197104513501845	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	6	0.5	3.9697884532846377	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	7	0.5	4.050995163547584	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	8	0.5	4.198039895932904	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	9	0.5	4.9391215717739465	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	10	0.5	5.071173328351495	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	11	0.5	5.140211533457429	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	12	0.5	5.328647877900699	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	13	0.5	5.3776986380495275	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	14	0.5	4.619167265668255	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	15	0.5	5.753117080225404	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	16	0.5	5.894907675667233	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	17	0.5	5.931042429422671	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	18	0.5	5.376198623517486	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	19	0.5	8.828385766046809	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	20	0.5	10.474397128840508	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	21	0.5	9.44959877914119	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	22	0.5	6.494984270799136	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	23	0.5	5.440342270874966	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	24	0.5	6.082425386266001	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	25	0.5	7.123638910094903	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	26	0.5	8.010076055651671	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+participation_ratio	27	0.5	8.712234062923391	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	0	0.5	11.805546780442123	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	1	0.5	33.099202492691205	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	2	0.5	42.81061183281487	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	3	0.5	42.359679309833616	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	4	0.5	38.032968340343885	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	5	0.5	16.50106986858693	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	6	0.5	9.713594475700239	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	7	0.5	8.899400183918438	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	8	0.5	9.734861330529895	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	9	0.5	13.127459736906523	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	10	0.5	14.084395725705773	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	11	0.5	15.087235473115884	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	12	0.5	16.226251759517716	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	13	0.5	13.108625999443017	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	14	0.5	10.805407756793578	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	15	0.5	15.002621788226023	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	16	0.5	15.499093717682587	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	17	0.5	15.191596999356037	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	18	0.5	15.37201546197392	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	19	0.5	28.496981870539827	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	20	0.5	33.394120197556376	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	21	0.5	27.308374526198556	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	22	0.5	17.96125422073549	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	23	0.5	13.491351110244917	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	24	0.5	15.546133135951637	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	25	0.5	17.741212088373363	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	26	0.5	22.891127148903582	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+effective_rank	27	0.5	23.46177593640338	pool=mean_tokens;subset=per_class_fixed_shared_split:train;train_k=50;val_k=20;ncm=cosine
+linear_top1	0	0.5	0.9950000643730164	
+linear_top5	0	0.5	1.0	
+knn_top1	0	0.5	0.88	
+knn_recall_at_k	0	0.5	0.994	
+linear_top1	1	0.5	1.0	
+linear_top5	1	0.5	1.0	
+knn_top1	1	0.5	0.989	
+knn_recall_at_k	1	0.5	0.997	
+linear_top1	2	0.5	1.0	
+linear_top5	2	0.5	1.0	
+knn_top1	2	0.5	0.991	
+knn_recall_at_k	2	0.5	0.997	
+linear_top1	3	0.5	1.0	
+linear_top5	3	0.5	1.0	
+knn_top1	3	0.5	0.99	
+knn_recall_at_k	3	0.5	1.0	
+linear_top1	4	0.5	1.0	
+linear_top5	4	0.5	1.0	
+knn_top1	4	0.5	0.982	
+knn_recall_at_k	4	0.5	0.999	
+linear_top1	5	0.5	1.0	
+linear_top5	5	0.5	1.0	
+knn_top1	5	0.5	0.928	
+knn_recall_at_k	5	0.5	0.992	
+linear_top1	6	0.5	1.0	
+linear_top5	6	0.5	1.0	
+knn_top1	6	0.5	0.876	
+knn_recall_at_k	6	0.5	0.988	
+linear_top1	7	0.5	0.999000072479248	
+linear_top5	7	0.5	1.0	
+knn_top1	7	0.5	0.837	
+knn_recall_at_k	7	0.5	0.987	
+linear_top1	8	0.5	1.0	
+linear_top5	8	0.5	1.0	
+knn_top1	8	0.5	0.857	
+knn_recall_at_k	8	0.5	0.988	
+linear_top1	9	0.5	1.0	
+linear_top5	9	0.5	1.0	
+knn_top1	9	0.5	0.915	
+knn_recall_at_k	9	0.5	0.992	
+linear_top1	10	0.5	1.0	
+linear_top5	10	0.5	1.0	
+knn_top1	10	0.5	0.924	
+knn_recall_at_k	10	0.5	0.992	
+linear_top1	11	0.5	1.0	
+linear_top5	11	0.5	1.0	
+knn_top1	11	0.5	0.932	
+knn_recall_at_k	11	0.5	0.993	
+linear_top1	12	0.5	1.0	
+linear_top5	12	0.5	1.0	
+knn_top1	12	0.5	0.941	
+knn_recall_at_k	12	0.5	0.994	
+linear_top1	13	0.5	1.0	
+linear_top5	13	0.5	1.0	
+knn_top1	13	0.5	0.894	
+knn_recall_at_k	13	0.5	0.992	
+linear_top1	14	0.5	1.0	
+linear_top5	14	0.5	1.0	
+knn_top1	14	0.5	0.844	
+knn_recall_at_k	14	0.5	0.988	
+linear_top1	15	0.5	1.0	
+linear_top5	15	0.5	1.0	
+knn_top1	15	0.5	0.922	
+knn_recall_at_k	15	0.5	0.99	
+linear_top1	16	0.5	0.999000072479248	
+linear_top5	16	0.5	1.0	
+knn_top1	16	0.5	0.879	
+knn_recall_at_k	16	0.5	0.99	
+linear_top1	17	0.5	1.0	
+linear_top5	17	0.5	1.0	
+knn_top1	17	0.5	0.876	
+knn_recall_at_k	17	0.5	0.99	
+linear_top1	18	0.5	1.0	
+linear_top5	18	0.5	1.0	
+knn_top1	18	0.5	0.886	
+knn_recall_at_k	18	0.5	0.989	
+linear_top1	19	0.5	1.0	
+linear_top5	19	0.5	1.0	
+knn_top1	19	0.5	0.926	
+knn_recall_at_k	19	0.5	0.992	
+linear_top1	20	0.5	0.9980000257492065	
+linear_top5	20	0.5	1.0	
+knn_top1	20	0.5	0.93	
+knn_recall_at_k	20	0.5	0.993	
+linear_top1	21	0.5	0.9970000386238098	
+linear_top5	21	0.5	1.0	
+knn_top1	21	0.5	0.884	
+knn_recall_at_k	21	0.5	0.992	
+linear_top1	22	0.5	0.9950000643730164	
+linear_top5	22	0.5	0.999000072479248	
+knn_top1	22	0.5	0.763	
+knn_recall_at_k	22	0.5	0.985	
+linear_top1	23	0.5	0.9910000562667847	
+linear_top5	23	0.5	0.999000072479248	
+knn_top1	23	0.5	0.538	
+knn_recall_at_k	23	0.5	0.98	
+linear_top1	24	0.5	0.9910000562667847	
+linear_top5	24	0.5	0.9960000514984131	
+knn_top1	24	0.5	0.501	
+knn_recall_at_k	24	0.5	0.976	
+linear_top1	25	0.5	0.9850000739097595	
+linear_top5	25	0.5	0.9930000305175781	
+knn_top1	25	0.5	0.538	
+knn_recall_at_k	25	0.5	0.981	
+linear_top1	26	0.5	0.9850000739097595	
+linear_top5	26	0.5	0.9910000562667847	
+knn_top1	26	0.5	0.654	
+knn_recall_at_k	26	0.5	0.985	
+linear_top1	27	0.5	0.9760000705718994	
+linear_top5	27	0.5	0.9880000352859497	
+knn_top1	27	0.5	0.507	
+knn_recall_at_k	27	0.5	0.979	
+cka	0	0.5	0.22406943142414093	ref=dinov2_vitb14;feature=mean_patch
+cknna	0	0.5	0.06871246546506882	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	1	0.5	0.398257315158844	ref=dinov2_vitb14;feature=mean_patch
+cknna	1	0.5	0.09934817254543304	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	2	0.5	0.41550952196121216	ref=dinov2_vitb14;feature=mean_patch
+cknna	2	0.5	0.09874407202005386	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	3	0.5	0.4025973677635193	ref=dinov2_vitb14;feature=mean_patch
+cknna	3	0.5	0.11216939985752106	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	4	0.5	0.3862718939781189	ref=dinov2_vitb14;feature=mean_patch
+cknna	4	0.5	0.12759751081466675	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	5	0.5	0.29342418909072876	ref=dinov2_vitb14;feature=mean_patch
+cknna	5	0.5	0.09987180680036545	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	6	0.5	0.21653704345226288	ref=dinov2_vitb14;feature=mean_patch
+cknna	6	0.5	0.07534875720739365	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	7	0.5	0.2122466266155243	ref=dinov2_vitb14;feature=mean_patch
+cknna	7	0.5	0.07920951396226883	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	8	0.5	0.21501249074935913	ref=dinov2_vitb14;feature=mean_patch
+cknna	8	0.5	0.08116210252046585	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	9	0.5	0.24382105469703674	ref=dinov2_vitb14;feature=mean_patch
+cknna	9	0.5	0.08656634390354156	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	10	0.5	0.2353995442390442	ref=dinov2_vitb14;feature=mean_patch
+cknna	10	0.5	0.08688610047101974	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	11	0.5	0.2458096742630005	ref=dinov2_vitb14;feature=mean_patch
+cknna	11	0.5	0.08794789761304855	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	12	0.5	0.25742995738983154	ref=dinov2_vitb14;feature=mean_patch
+cknna	12	0.5	0.09388740360736847	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	13	0.5	0.26517483592033386	ref=dinov2_vitb14;feature=mean_patch
+cknna	13	0.5	0.07942525297403336	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	14	0.5	0.2289559245109558	ref=dinov2_vitb14;feature=mean_patch
+cknna	14	0.5	0.07105883210897446	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	15	0.5	0.2494163066148758	ref=dinov2_vitb14;feature=mean_patch
+cknna	15	0.5	0.09194285422563553	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	16	0.5	0.2604670524597168	ref=dinov2_vitb14;feature=mean_patch
+cknna	16	0.5	0.08722373098134995	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	17	0.5	0.2575479745864868	ref=dinov2_vitb14;feature=mean_patch
+cknna	17	0.5	0.0856078490614891	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	18	0.5	0.24302586913108826	ref=dinov2_vitb14;feature=mean_patch
+cknna	18	0.5	0.09929715842008591	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	19	0.5	0.3459000587463379	ref=dinov2_vitb14;feature=mean_patch
+cknna	19	0.5	0.11894752085208893	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	20	0.5	0.36825692653656006	ref=dinov2_vitb14;feature=mean_patch
+cknna	20	0.5	0.12812268733978271	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	21	0.5	0.3352033495903015	ref=dinov2_vitb14;feature=mean_patch
+cknna	21	0.5	0.11786040663719177	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	22	0.5	0.2612151503562927	ref=dinov2_vitb14;feature=mean_patch
+cknna	22	0.5	0.0819338709115982	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	23	0.5	0.23904027044773102	ref=dinov2_vitb14;feature=mean_patch
+cknna	23	0.5	0.07211971282958984	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	24	0.5	0.26851198077201843	ref=dinov2_vitb14;feature=mean_patch
+cknna	24	0.5	0.08571653068065643	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	25	0.5	0.28916576504707336	ref=dinov2_vitb14;feature=mean_patch
+cknna	25	0.5	0.09164390712976456	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	26	0.5	0.31483256816864014	ref=dinov2_vitb14;feature=mean_patch
+cknna	26	0.5	0.08577290922403336	ref=dinov2_vitb14;feature=mean_patch;k=10
+cka	27	0.5	0.29777881503105164	ref=dinov2_vitb14;feature=mean_patch
+cknna	27	0.5	0.08828941732645035	ref=dinov2_vitb14;feature=mean_patch;k=10

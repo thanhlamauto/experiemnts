@@ -1,0 +1,17 @@
+.hf_home/
+.pytest_cache/
+.venv-backups/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+outputs_bundle_20260329.zip
+
+REPA/pretrained_models/*.pt
+SiT/pretrained_models/*.pt
+
+*.swp
+*.swo
+.DS_Store
