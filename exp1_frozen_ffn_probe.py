@@ -352,42 +352,117 @@ def decode_latent_to_pil(vae: nn.Module, latent: torch.Tensor):
 
 
 @torch.no_grad()
-def visualize_layer_outputs(
+def visualize_all_layers_all_timesteps(
     model: nn.Module,
     backend: str,
     vae: nn.Module,
-    x_latent: torch.Tensor,
-    t_val: float,
-    y: torch.Tensor,
-    layers_to_show: List[int],
+    x0_latents: torch.Tensor,   # (N, 4, 32, 32) clean latents
+    all_labels: torch.Tensor,   # (N,) labels
+    timesteps: List[float],
     outdir: Path,
     tag: str,
+    n_imgs: int = 4,
+    seed: int = 42,
 ) -> None:
-    """Decode hidden state at selected layers → save PIL image grid."""
-    B = x_latent.shape[0]
-    t = torch.full((B,), t_val, device=x_latent.device, dtype=x_latent.dtype)
+    """
+    For every timestep t and every layer ℓ:
+      - Decode hidden state through frozen final_layer → VAE decode → save image
+    Also saves:
+      - A per-timestep summary grid: rows=layers, cols=sample images
+      - A reference grid of the clean x0 images
+    """
+    from PIL import Image, ImageDraw, ImageFont
 
-    if backend == "sit":
-        hidden_states, c = get_hidden_states_sit(model, x_latent, t, y)
-    else:
-        hidden_states, c = get_hidden_states_repa(model, x_latent, t, y)
+    n_blocks = len(model.blocks)
+    imgs_dir = outdir / tag
+    imgs_dir.mkdir(parents=True, exist_ok=True)
 
-    outdir.mkdir(parents=True, exist_ok=True)
-    for ell in layers_to_show:
-        H = hidden_states[ell]
-        pred_patches = model.final_layer(H, c)
+    # Fixed small batch for visualization
+    torch.manual_seed(seed)
+    x0 = x0_latents[:n_imgs].to(next(model.parameters()).device)
+    y  = all_labels[:n_imgs].to(x0.device)
+    B  = x0.shape[0]
+
+    # Save clean reference
+    ref_path = imgs_dir / "00_reference_clean_x0.png"
+    ref_pil = decode_latent_to_pil(vae, x0)
+    ref_pil.save(str(ref_path))
+    print(f"  [viz] saved reference: {ref_path}")
+
+    for t_val in timesteps:
+        print(f"  [viz] timestep t={t_val:.1f} — decoding all {n_blocks} layers...")
+        t_tensor = torch.full((B,), t_val, device=x0.device, dtype=x0.dtype)
+        eps      = torch.randn_like(x0)
+        x_noisy  = (1 - t_val) * x0 + t_val * eps
+
         if backend == "sit":
-            pred_img = model.unpatchify(pred_patches)
-            pred_noise = pred_img[:, :4]
+            hidden_states, c = get_hidden_states_sit(model, x_noisy, t_tensor, y)
         else:
-            pred_img = model.unpatchify(pred_patches)
-            pred_noise = pred_img
+            hidden_states, c = get_hidden_states_repa(model, x_noisy, t_tensor, y)
 
-        # Show first 4 images in the batch
-        pil = decode_latent_to_pil(vae, pred_noise[:4].clamp(-5, 5))
-        fname = outdir / f"{tag}_layer{ell:02d}_t{t_val:.1f}.png"
-        pil.save(str(fname))
-        print(f"  saved {fname}")
+        # --- per-layer images (individual) ---
+        t_dir = imgs_dir / f"t{t_val:.1f}"
+        t_dir.mkdir(parents=True, exist_ok=True)
+
+        # Also collect rows for the summary grid
+        row_images: List[np.ndarray] = []   # one row per layer
+
+        for ell in range(n_blocks):
+            H = hidden_states[ell]
+            pred_patches = model.final_layer(H, c)
+            if backend == "sit":
+                pred_v = model.unpatchify(pred_patches)[:, :4]
+            else:
+                pred_v = model.unpatchify(pred_patches)
+
+            pil = decode_latent_to_pil(vae, pred_v.clamp(-5, 5))
+            fname = t_dir / f"layer{ell:02d}.png"
+            pil.save(str(fname))
+
+            # collect row pixels for summary
+            row_images.append(np.array(pil))
+
+        # --- summary grid: rows=layers, cols=sample images ---
+        # Each row_images[ell] is already a grid of n_imgs images stitched horizontally
+        summary = np.vstack(row_images)  # (n_blocks*H, n_imgs*W, 3)
+        summary_pil = Image.fromarray(summary)
+
+        # Draw layer labels on the left side
+        draw = ImageDraw.Draw(summary_pil)
+        h_per_row = row_images[0].shape[0]
+        for ell in range(n_blocks):
+            y_pos = ell * h_per_row + 4
+            draw.text((4, y_pos), f"L{ell:02d}", fill=(255, 220, 0))
+
+        summary_path = imgs_dir / f"summary_t{t_val:.1f}.png"
+        summary_pil.save(str(summary_path))
+        print(f"    summary grid saved: {summary_path}")
+
+    # --- cross-timestep summary for each layer ---
+    # One image per layer with columns = different timesteps
+    print(f"  [viz] building per-layer cross-timestep grids...")
+    for ell in range(n_blocks):
+        t_strips: List[np.ndarray] = []
+        for t_val in timesteps:
+            p = imgs_dir / f"t{t_val:.1f}" / f"layer{ell:02d}.png"
+            if p.exists():
+                t_strips.append(np.array(Image.open(str(p))))
+        if t_strips:
+            combo = np.hstack(t_strips)
+            combo_pil = Image.fromarray(combo)
+            draw = ImageDraw.Draw(combo_pil)
+            for ti, t_val in enumerate(timesteps):
+                draw.text((4 + ti * t_strips[0].shape[1], 4), f"t={t_val:.1f}", fill=(255, 220, 0))
+            cp = imgs_dir / f"layer{ell:02d}_all_timesteps.png"
+            combo_pil.save(str(cp))
+
+    print(f"  [viz] all images saved to: {imgs_dir}")
+    print(f"  [viz] output structure:")
+    print(f"        {tag}/00_reference_clean_x0.png   — clean input")
+    print(f"        {tag}/summary_t<T>.png            — all layers at one timestep")
+    print(f"        {tag}/layer<L>_all_timesteps.png  — one layer across all timesteps")
+    print(f"        {tag}/t<T>/layer<L>.png           — individual images")
+
 
 
 # ---------------------------------------------------------------------------
@@ -425,13 +500,11 @@ def main():
     parser.add_argument("--backends", default="sit,repa",
                         help="Which models to run: sit, repa, or sit,repa")
     parser.add_argument("--vae", default="mse", choices=["ema", "mse"])
-    # Viz
-    parser.add_argument("--viz-layers", default="0,6,13,20,27",
-                        help="Layer indices to visualize (comma-sep)")
-    parser.add_argument("--viz-timestep", type=float, default=0.5,
-                        help="Timestep to use for visualization")
+    # Visualization
     parser.add_argument("--n-viz-images", type=int, default=4,
-                        help="Number of images to decode for visualization")
+                        help="Number of sample images to decode per layer per timestep (max 4 for clean grids)")
+    parser.add_argument("--skip-viz", action="store_true",
+                        help="Skip image visualization (only compute and save loss CSV)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -585,22 +658,22 @@ def main():
                 f.write(row + "\n")
         print(f"\n  [saved] loss table: {loss_csv}")
 
-        # ---- Visualization: decode images at selected layers ----------------
-        print(f"\n  [viz] decoding images at layers {viz_layers}, t={args.viz_timestep}")
-        viz_latents = all_latents[:args.n_viz_images].to(device)
-        viz_labels = all_labels[:args.n_viz_images].to(device)
-        viz_dir = outdir / "images"
-        visualize_layer_outputs(
-            model, backend, vae,
-            viz_latents, args.viz_timestep, viz_labels,
-            viz_layers, viz_dir, tag=backend
-        )
-
-        # Also save the original (clean) decoded images for reference
-        with torch.no_grad():
-            orig_pil = decode_latent_to_pil(vae, viz_latents[:4])
-            orig_pil.save(str(viz_dir / f"{backend}_original_clean.png"))
-            print(f"  saved reference: {viz_dir / f'{backend}_original_clean.png'}")
+        # ---- Visualization: all layers x all timesteps ----------------------
+        if args.skip_viz:
+            print("  [viz] skipped (--skip-viz)")
+        else:
+            print(f"\n  [viz] decoding ALL {n_blocks} layers x {len(timesteps)} timesteps for {backend}...")
+            print(f"        (this saves individual images + summary grids)")
+            viz_dir = outdir / "images"
+            visualize_all_layers_all_timesteps(
+                model, backend, vae,
+                all_latents, all_labels,
+                timesteps=timesteps,
+                outdir=viz_dir,
+                tag=backend,
+                n_imgs=min(args.n_viz_images, 4),
+                seed=args.seed,
+            )
 
         del model
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
