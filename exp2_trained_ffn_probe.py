@@ -482,22 +482,22 @@ def train_one_model(
             # flow matching velocity target: v = eps - x0
             v_target = eps - x0  # (B, 4, 32, 32)
 
-            # Collect hidden states (frozen model, no grad)
-            with torch.no_grad():
-                hidden_states, c = collect_hidden_states(model, backend, x_noisy, t_vals, labels)
-
-            # Train probe heads
+            # Collect hidden states (frozen model) and train probe heads
             optimizer.zero_grad()
-            total_loss = torch.tensor(0.0, device=device)
-            layer_losses_batch: Dict[int, float] = {}
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=args.bf16):
+                with torch.no_grad():
+                    hidden_states, c = collect_hidden_states(model, backend, x_noisy, t_vals, labels)
 
-            for ell in range(n_blocks):
-                H = hidden_states[ell]   # (B, T, D) — on device
-                pred_patches = probe_bank.forward_layer(ell, H, c)  # (B, T, p*p*4)
-                pred_img = unpatchify(pred_patches)                   # (B, 4, H, W)
-                loss_ell = ((pred_img - v_target) ** 2).mean()
-                total_loss = total_loss + loss_ell
-                layer_losses_batch[ell] = float(loss_ell.detach().item())
+                total_loss = torch.tensor(0.0, device=device)
+                layer_losses_batch: Dict[int, float] = {}
+
+                for ell in range(n_blocks):
+                    H = hidden_states[ell]   # (B, T, D) — on device
+                    pred_patches = probe_bank.forward_layer(ell, H, c)  # (B, T, p*p*4)
+                    pred_img = unpatchify(pred_patches)                   # (B, 4, H, W)
+                    loss_ell = ((pred_img - v_target) ** 2).mean()
+                    total_loss = total_loss + loss_ell
+                    layer_losses_batch[ell] = float(loss_ell.detach().item())
 
             total_loss.backward()
             nn.utils.clip_grad_norm_(probe_bank.parameters(), 1.0)
@@ -568,6 +568,9 @@ def main():
     parser.add_argument("--timesteps", default="0.1,0.3,0.5,0.7,0.9",
                         help="Timesteps for eval-time loss table (not used during training)")
     parser.add_argument("--vae", default="mse", choices=["ema", "mse"])
+    # A100 Optimizations
+    parser.add_argument("--bf16", action="store_true", help="Enable bfloat16 AMP (huge speedup on Ampere GPUs like A100)")
+    parser.add_argument("--tf32", action="store_true", help="Enable TF32 matmul (huge speedup on Ampere GPUs like A100)")
     # Visualization
     parser.add_argument("--n-viz-images", type=int, default=4,
                         help="Number of images to decode per layer (max 4)")
@@ -580,6 +583,11 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    if args.tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print("[config] TF32 matmul enabled")
 
     # Resolve all paths relative to the script's own directory
     sit_root  = Path(args.sit_root)  if args.sit_root  else _SCRIPT_DIR / "SiT"
