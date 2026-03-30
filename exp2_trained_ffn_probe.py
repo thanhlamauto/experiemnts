@@ -44,6 +44,9 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+# Directory of this script — used as base for all relative paths
+_SCRIPT_DIR = Path(__file__).resolve().parent
+
 
 # ============================================================
 # Re-use download helpers from exp1
@@ -486,11 +489,13 @@ def main():
         description="Exp 2: Trained FFN probe on SiT/REPA hidden states"
     )
     # Paths
-    parser.add_argument("--sit-root", default="./SiT")
-    parser.add_argument("--repa-root", default="./REPA")
-    parser.add_argument("--sit-ckpt", default="pretrained_models/SiT-XL-2-256x256.pt")
-    parser.add_argument("--repa-ckpt", default="pretrained_models/repa-last.pt")
-    parser.add_argument("--outdir", default="outputs/exp2")
+    parser.add_argument("--sit-root", default=None,
+                        help="Path to SiT repo (default: ./SiT relative to this script)")
+    parser.add_argument("--repa-root", default=None,
+                        help="Path to REPA repo (default: ./REPA relative to this script)")
+    parser.add_argument("--sit-ckpt", default=None)
+    parser.add_argument("--repa-ckpt", default=None)
+    parser.add_argument("--outdir", default=None)
     # Data
     parser.add_argument("--data-dir", default=None,
                         help="ImageNet train dir (uses tiny-imagenet if not given)")
@@ -513,10 +518,28 @@ def main():
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    # Resolve all paths relative to the script's own directory
+    sit_root  = Path(args.sit_root)  if args.sit_root  else _SCRIPT_DIR / "SiT"
+    repa_root = Path(args.repa_root) if args.repa_root else _SCRIPT_DIR / "REPA"
+    sit_ckpt  = args.sit_ckpt  if args.sit_ckpt  else str(_SCRIPT_DIR / "pretrained_models" / "SiT-XL-2-256x256.pt")
+    repa_ckpt = args.repa_ckpt if args.repa_ckpt else str(_SCRIPT_DIR / "pretrained_models" / "repa-last.pt")
+    outdir_p  = Path(args.outdir) if args.outdir else _SCRIPT_DIR / "outputs" / "exp2"
+
+    args.sit_root  = str(sit_root)
+    args.repa_root = str(repa_root)
+    args.sit_ckpt  = sit_ckpt
+    args.repa_ckpt = repa_ckpt
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[device] {device}")
+    print(f"[paths] script_dir={_SCRIPT_DIR}")
+    print(f"[paths] sit_root={args.sit_root}")
+    print(f"[paths] repa_root={args.repa_root}")
 
-    outdir = Path(args.outdir)
+    outdir = outdir_p
     outdir.mkdir(parents=True, exist_ok=True)
 
     backends = [b.strip() for b in args.backends.split(",") if b.strip()]
