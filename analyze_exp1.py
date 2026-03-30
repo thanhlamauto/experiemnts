@@ -168,9 +168,100 @@ def show_layer_evolution(layer: int, backend: str = "sit"):
     else:
         print(f"Error: {path} not found.")
 
+
+def _compute_laplacian_variance(img_path: Path) -> float:
+    """Computes the variance of the Laplacian (proxy for high-frequency details/sharpness)."""
+    img = Image.open(str(img_path)).convert('L')
+    gray = np.array(img, dtype=np.float32)
+    # 3x3 Discrete Laplacian convolution (edges)
+    lap = (gray[0:-2, 1:-1] + gray[2:, 1:-1] + 
+           gray[1:-1, 0:-2] + gray[1:-1, 2:] - 
+           4 * gray[1:-1, 1:-1])
+    return float(np.var(lap))
+
+
+def plot_hf_curves(timesteps=None):
+    """
+    Measures and plots High-Frequency Detail (Laplacian Variance) for SiT vs REPA
+    by directly processing the saved output images.
+    If timesteps is None, it scans all 'tX.X' directories found.
+    """
+    backends = ["sit", "repa"]
+    data = {"sit": {}, "repa": {}}
+    
+    # Scan available timesteps from directory structure if not provided
+    if timesteps is None:
+        t_dirs = set()
+        for b in backends:
+            b_dir = EXP1_DIR / "images" / b
+            if b_dir.exists():
+                t_dirs.update([d.name for d in b_dir.glob("t*") if d.is_dir()])
+        timesteps_str = sorted(list(t_dirs))
+    else:
+        timesteps_str = [f"t{t:.1f}" for t in timesteps]
+
+    if not timesteps_str:
+        print(f"Error: No image directories found in {EXP1_DIR}/images")
+        return
+
+    # Compute scores
+    for b in backends:
+        for t_str in timesteps_str:
+            t_dir = EXP1_DIR / "images" / b / t_str
+            if not t_dir.exists():
+                continue
+                
+            layer_files = sorted(list(t_dir.glob("layer*.png")))
+            if not layer_files:
+                continue
+                
+            data[b][t_str] = {}
+            for lf in layer_files:
+                try:
+                    # Extract layer integer from filename 'layer05.png'
+                    layer_idx = int(lf.stem.replace("layer", ""))
+                    data[b][t_str][layer_idx] = _compute_laplacian_variance(lf)
+                except ValueError:
+                    pass
+
+    # Plot
+    n_plots = len(timesteps_str)
+    cols = min(n_plots, 3)
+    rows = int(np.ceil(n_plots / cols))
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows), squeeze=False)
+    axes = axes.flatten()
+    
+    for i, t_str in enumerate(timesteps_str):
+        ax = axes[i]
+        
+        if t_str in data["sit"] and data["sit"][t_str]:
+            layers = sorted(data["sit"][t_str].keys())
+            scores = [data["sit"][t_str][l] for l in layers]
+            ax.plot(layers, scores, label="SiT", marker='o', markersize=4, linestyle='-', linewidth=2)
+            
+        if t_str in data["repa"] and data["repa"][t_str]:
+            layers = sorted(data["repa"][t_str].keys())
+            scores = [data["repa"][t_str][l] for l in layers]
+            ax.plot(layers, scores, label="REPA", marker='s', markersize=4, linestyle='-', linewidth=2)
+            
+        ax.set_title(f"HF Detail (Sharpness) at {t_str}")
+        ax.set_xlabel("Layer Index (0 to 27)")
+        ax.set_ylabel("Laplacian Variance (Higher = Sharper)")
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+    for j in range(len(timesteps_str), len(axes)):
+        axes[j].set_visible(False)
+        
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     print("This module is intended to be imported into a Jupyter Notebook / Colab cell:")
     print("  import analyze_exp1 as viz")
     print("  viz.plot_loss_curves()")
+    print("  viz.plot_hf_curves()            # <--- New: plot sharpness/HF details from saved images")
     print("  viz.compare_summary(t=0.5)")
     print("  viz.compare_layer(layer=14, t=0.5)")
+
