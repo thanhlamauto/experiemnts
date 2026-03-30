@@ -248,21 +248,24 @@ def get_hidden_states_repa(
 @torch.no_grad()
 def probe_batch_frozen_ffn(
     model: nn.Module,
-    backend: str,           # "sit" or "repa"
-    x_latent: torch.Tensor, # (B, 4, 32, 32) — noisy latents
-    t: torch.Tensor,        # (B,) timestep in [0,1]
-    y: torch.Tensor,        # (B,) class labels
+    backend: str,            # "sit" or "repa"
+    x_noisy: torch.Tensor,   # (B, 4, 32, 32) — noisy latents x_t
+    t: torch.Tensor,         # (B,) timestep in [0,1]
+    y: torch.Tensor,         # (B,) class labels
+    v_target: torch.Tensor,  # (B, 4, 32, 32) — flow-matching velocity = eps - x0
 ) -> Dict[int, float]:
     """
     For each block ℓ:
-      H_ell → final_layer (frozen) → unpatchify → take noise channels
-    Returns MSE(pred_noise, noisy_input) per layer.
-    (proxy: how well this hidden state can reconstruct the noisy signal)
+      H_ell → final_layer (frozen) → unpatchify → take 4 channels
+    Returns MSE(pred_velocity, v_target) per layer.
+    v_target = eps - x0  (flow-matching linear path velocity)
+    This is the same loss the model was trained on, so it's directly comparable.
+    Works with both real AND random latents, since x0 and eps are always known.
     """
     if backend == "sit":
-        hidden_states, c = get_hidden_states_sit(model, x_latent, t, y)
+        hidden_states, c = get_hidden_states_sit(model, x_noisy, t, y)
     else:
-        hidden_states, c = get_hidden_states_repa(model, x_latent, t, y)
+        hidden_states, c = get_hidden_states_repa(model, x_noisy, t, y)
 
     losses: Dict[int, float] = {}
     n_blocks = len(model.blocks)
@@ -275,14 +278,14 @@ def probe_batch_frozen_ffn(
 
         # Unpatchify
         if backend == "sit":
-            pred_img = model.unpatchify(pred_patches)  # (B, 8, 32, 32)   (learn_sigma=True → 8ch)
-            pred_noise = pred_img[:, :4]               # take first 4 channels
+            pred_img = model.unpatchify(pred_patches)  # (B, 8, 32, 32) (learn_sigma=True -> 8ch)
+            pred_v = pred_img[:, :4]                   # first 4ch = velocity prediction
         else:
             pred_img = model.unpatchify(pred_patches)  # (B, 4, 32, 32)
-            pred_noise = pred_img
+            pred_v = pred_img
 
-        # Proxy MSE: how close the prediction is to the noisy input
-        mse = float(((pred_noise - x_latent) ** 2).mean().item())
+        # Flow-matching velocity MSE: the actual training objective of SiT/REPA
+        mse = float(((pred_v - v_target) ** 2).mean().item())
         losses[ell] = mse
 
     return losses
@@ -448,6 +451,8 @@ def main():
         use_real = True
     else:
         print(f"[data] no --data-dir given, using {args.n_samples} random latents")
+        print("[warn] Random latents are not from the ImageNet distribution.")
+        print("       Results give a rough structural signal but use real data for full analysis.")
         ds = RandomLatentDataset(n=args.n_samples, seed=args.seed)
         loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False)
         use_real = False
@@ -499,16 +504,20 @@ def main():
 
             # Accumulate over mini-batches
             for b_start in range(0, all_latents.shape[0], args.batch_size):
-                x_b = all_latents[b_start:b_start + args.batch_size].to(device)
+                x0 = all_latents[b_start:b_start + args.batch_size].to(device)
                 y_b = all_labels[b_start:b_start + args.batch_size].to(device)
-                B = x_b.shape[0]
+                B = x0.shape[0]
 
-                # Add flow-matching noise: x_t = (1-t)*x0 + t*eps
-                t_tensor = torch.full((B,), t_val, device=device, dtype=x_b.dtype)
-                eps = torch.randn_like(x_b)
-                x_noisy = (1 - t_val) * x_b + t_val * eps
+                # Flow-matching linear path: x_t = (1-t)*x0 + t*eps
+                t_tensor = torch.full((B,), t_val, device=device, dtype=x0.dtype)
+                eps = torch.randn_like(x0)
+                x_noisy = (1 - t_val) * x0 + t_val * eps
+                # Velocity target: v = eps - x0  (this is what SiT/REPA is trained to predict)
+                v_target = eps - x0
 
-                batch_losses = probe_batch_frozen_ffn(model, backend, x_noisy, t_tensor, y_b)
+                batch_losses = probe_batch_frozen_ffn(
+                    model, backend, x_noisy, t_tensor, y_b, v_target
+                )
 
                 for ell, loss in batch_losses.items():
                     layer_losses_sum[ell] += loss
