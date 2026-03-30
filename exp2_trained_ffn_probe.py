@@ -329,40 +329,96 @@ def decode_and_save_grid(
 
 
 @torch.no_grad()
-def visualize_probe_outputs(
+def visualize_all_layers_all_timesteps_probe(
     model: nn.Module,
     backend: str,
     probe_bank: LayerProbeBank,
     vae: nn.Module,
     x0_latents: torch.Tensor,
-    y: torch.Tensor,
-    t_val: float,
-    layers_to_show: List[int],
+    all_labels: torch.Tensor,
+    timesteps: List[float],
     outdir: Path,
     tag: str,
     device: torch.device,
+    n_imgs: int = 4,
 ) -> None:
-    B = x0_latents.shape[0]
-    x0 = x0_latents.to(device)
-    y = y.to(device)
-    t_tensor = torch.full((B,), t_val, device=device, dtype=x0.dtype)
-    eps = torch.randn_like(x0)
-    x_noisy = (1 - t_val) * x0 + t_val * eps
+    from PIL import Image, ImageDraw
 
-    hidden_states, c = collect_hidden_states(model, backend, x_noisy, t_tensor, y)
+    n_blocks = len(model.blocks)
+    imgs_dir = outdir / tag
+    imgs_dir.mkdir(parents=True, exist_ok=True)
 
-    for ell in layers_to_show:
-        H = hidden_states[ell]
-        pred_patches = probe_bank.forward_layer(ell, H, c)
-        pred_latent = unpatchify(pred_patches)
-        save_path = outdir / "images" / f"{tag}_probe_layer{ell:02d}_t{t_val:.1f}.png"
-        decode_and_save_grid(vae, pred_latent, save_path, title=f"layer={ell} t={t_val}")
-        print(f"  saved {save_path}")
+    x0 = x0_latents[:n_imgs].to(device)
+    y  = all_labels[:n_imgs].to(device)
+    B  = x0.shape[0]
 
-    # Also save the clean original as reference
-    ref_path = outdir / "images" / f"{tag}_clean_ref.png"
+    # Save clean reference
+    ref_path = imgs_dir / "00_reference_clean_x0.png"
     if not ref_path.exists():
-        decode_and_save_grid(vae, x0[:4], ref_path, title="clean x0")
+        decode_and_save_grid(vae, x0, ref_path)
+
+    for t_val in timesteps:
+        t_tensor = torch.full((B,), t_val, device=device, dtype=x0.dtype)
+        eps      = torch.randn_like(x0)
+        x_noisy  = (1 - t_val) * x0 + t_val * eps
+
+        hidden_states, c = collect_hidden_states(model, backend, x_noisy, t_tensor, y)
+
+        t_dir = imgs_dir / f"t{t_val:.1f}"
+        t_dir.mkdir(parents=True, exist_ok=True)
+
+        row_images: List[np.ndarray] = []
+
+        for ell in range(n_blocks):
+            H = hidden_states[ell]
+            pred_patches = probe_bank.forward_layer(ell, H, c)
+            pred_v = unpatchify(pred_patches)
+
+            # Decode to PIL
+            latents_scaled = pred_v.clamp(-5, 5) / 0.18215
+            imgs = vae.decode(latents_scaled).sample
+            imgs = ((imgs.clamp(-1, 1) + 1) / 2 * 255).byte().cpu().numpy().transpose(0, 2, 3, 1)
+            H_img, W_img = imgs.shape[1:3]
+            cols = min(B, 4)
+            rows = math.ceil(B / cols)
+            canvas = np.zeros((rows * H_img, cols * W_img, 3), dtype=np.uint8)
+            for i, img in enumerate(imgs):
+                r, c_idx = divmod(i, cols)
+                canvas[r * H_img:(r + 1) * H_img, c_idx * W_img:(c_idx + 1) * W_img] = img
+            pil = Image.fromarray(canvas)
+
+            fname = t_dir / f"layer{ell:02d}.png"
+            pil.save(str(fname))
+            row_images.append(canvas)
+
+        # Summary grid
+        summary = np.vstack(row_images)
+        summary_pil = Image.fromarray(summary)
+        draw = ImageDraw.Draw(summary_pil)
+        h_per_row = row_images[0].shape[0]
+        for ell in range(n_blocks):
+            y_pos = ell * h_per_row + 4
+            draw.text((4, y_pos), f"L{ell:02d}", fill=(255, 220, 0))
+
+        summary_path = imgs_dir / f"summary_t{t_val:.1f}.png"
+        summary_pil.save(str(summary_path))
+
+    # Cross-timestep summary per layer
+    for ell in range(n_blocks):
+        t_strips: List[np.ndarray] = []
+        for t_val in timesteps:
+            p = imgs_dir / f"t{t_val:.1f}" / f"layer{ell:02d}.png"
+            if p.exists():
+                t_strips.append(np.array(Image.open(str(p))))
+        if t_strips:
+            combo = np.hstack(t_strips)
+            combo_pil = Image.fromarray(combo)
+            draw = ImageDraw.Draw(combo_pil)
+            for ti, t_val in enumerate(timesteps):
+                draw.text((4 + ti * t_strips[0].shape[1], 4), f"t={t_val:.1f}", fill=(255, 220, 0))
+            cp = imgs_dir / f"layer{ell:02d}_all_timesteps.png"
+            combo_pil.save(str(cp))
+
 
 
 # ============================================================
@@ -465,17 +521,19 @@ def train_one_model(
         for ell in range(n_blocks):
             print(f"  layer {ell:2d}: {avg_layer[ell]:.4f}")
 
-        # Visualize after every epoch
+        # Visualize after every epoch (all layers, all timesteps)
         probe_bank.eval()
-        if viz_batch is not None:
-            viz_layers = [int(l) for l in args.viz_layers.split(",") if l.strip()]
-            visualize_probe_outputs(
+        if viz_batch is not None and not args.skip_viz:
+            visualize_all_layers_all_timesteps_probe(
                 model, backend, probe_bank, vae,
                 viz_batch[0], viz_batch[1],
-                t_val=0.5, layers_to_show=viz_layers,
-                outdir=outdir, tag=f"{tag}_ep{epoch+1:02d}",
+                timesteps=timesteps,
+                outdir=outdir / "images",
+                tag=f"{tag}_ep{epoch+1:02d}",
                 device=device,
+                n_imgs=min(args.n_viz_images, 4),
             )
+
 
     return per_layer_epoch_loss
 
@@ -511,8 +569,10 @@ def main():
                         help="Timesteps for eval-time loss table (not used during training)")
     parser.add_argument("--vae", default="mse", choices=["ema", "mse"])
     # Visualization
-    parser.add_argument("--viz-layers", default="0,6,13,20,27")
-    parser.add_argument("--n-viz-images", type=int, default=4)
+    parser.add_argument("--n-viz-images", type=int, default=4,
+                        help="Number of images to decode per layer (max 4)")
+    parser.add_argument("--skip-viz", action="store_true",
+                        help="Skip generating image grids after each epoch")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
