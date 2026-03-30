@@ -534,7 +534,6 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     timesteps = [float(t.strip()) for t in args.timesteps.split(",") if t.strip()]
-    viz_layers = [int(l) for l in args.viz_layers.split(",") if l.strip()]
     backends = [b.strip() for b in args.backends.split(",") if b.strip()]
 
     # ---- Download checkpoints -------------------------------------------
