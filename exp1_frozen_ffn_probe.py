@@ -158,7 +158,7 @@ class RandomLatentDataset(Dataset):
 
 
 def build_imagenet_loader(data_dir: str, batch_size: int, n_workers: int, n_samples: int = 256):
-    """Load real ImageNet val images and encode to latents on-the-fly."""
+    """Load real ImageNet val images (ImageFolder format)."""
     from torchvision.datasets import ImageFolder
     tfm = T.Compose([
         T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
@@ -167,10 +167,47 @@ def build_imagenet_loader(data_dir: str, batch_size: int, n_workers: int, n_samp
         T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     ])
     ds = ImageFolder(data_dir, transform=tfm)
-    # subsample
     indices = torch.randperm(len(ds))[:n_samples].tolist()
     sub = torch.utils.data.Subset(ds, indices)
     return DataLoader(sub, batch_size=batch_size, shuffle=False, num_workers=n_workers, pin_memory=True)
+
+
+def build_tiny_imagenet_loader(batch_size: int, n_workers: int, n_samples: int = 256, split: str = "valid"):
+    """Auto-download tiny-imagenet from HuggingFace (200 cls, ~100MB). No --data-dir needed."""
+    print("[data] downloading tiny-imagenet from HuggingFace (first run only ~100MB)...")
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("Run: pip install datasets")
+
+    ds_hf = load_dataset("zh-plus/tiny-imagenet", split=split)
+
+    tfm = T.Compose([
+        T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
+        T.CenterCrop(256),
+        T.ToTensor(),
+        T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+    ])
+
+    class _Wrapper(Dataset):
+        def __init__(self, hf_ds, indices):
+            self.ds = hf_ds
+            self.indices = indices
+        def __len__(self):
+            return len(self.indices)
+        def __getitem__(self, idx):
+            item = self.ds[int(self.indices[idx])]
+            img = item["image"]
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            return tfm(img), item["label"]
+
+    indices = torch.randperm(len(ds_hf))[:n_samples].tolist()
+    wrapped = _Wrapper(ds_hf, indices)
+    print(f"[data] tiny-imagenet loaded: using {len(wrapped)} samples from '{split}' split")
+    return DataLoader(wrapped, batch_size=batch_size, shuffle=False,
+                      num_workers=n_workers, pin_memory=True)
+
 
 
 @torch.no_grad()
@@ -374,9 +411,11 @@ def main():
                         help="Directory to save loss tables and images (default: <script_dir>/outputs/exp1)")
     # Data
     parser.add_argument("--data-dir", default=None,
-                        help="ImageNet val dir (optional; uses random latents if not given)")
+                        help="ImageNet val dir (ImageFolder). If not given, tiny-imagenet is auto-downloaded.")
+    parser.add_argument("--random-latents", action="store_true",
+                        help="Skip real data, use random Gaussian latents (fast demo, less meaningful results)")
     parser.add_argument("--n-samples", type=int, default=256,
-                        help="Number of images/latents to use (batch for loss)")
+                        help="Number of images to use for loss computation")
     parser.add_argument("--batch-size", type=int, default=32,
                         help="Batch size per forward pass (accumulate over n-samples)")
     parser.add_argument("--n-workers", type=int, default=2)
@@ -446,16 +485,19 @@ def main():
 
     # ---- Build data --------------------------------------------------------
     if args.data_dir:
-        print(f"[data] loading ImageNet from {args.data_dir}...")
+        print(f"[data] using ImageNet from {args.data_dir}")
         loader = build_imagenet_loader(args.data_dir, args.batch_size, args.n_workers, args.n_samples)
         use_real = True
-    else:
-        print(f"[data] no --data-dir given, using {args.n_samples} random latents")
-        print("[warn] Random latents are not from the ImageNet distribution.")
-        print("       Results give a rough structural signal but use real data for full analysis.")
+    elif args.random_latents:
+        print(f"[data] --random-latents: using {args.n_samples} random Gaussian latents (demo mode)")
+        print("[warn] Results may not reflect real model behavior — use real data for analysis.")
         ds = RandomLatentDataset(n=args.n_samples, seed=args.seed)
         loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False)
         use_real = False
+    else:
+        # Default: auto-download tiny-imagenet
+        loader = build_tiny_imagenet_loader(args.batch_size, args.n_workers, args.n_samples)
+        use_real = True
 
     # Collect all latents + labels upfront (they're reused across timesteps/models)
     all_latents: List[torch.Tensor] = []
