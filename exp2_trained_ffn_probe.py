@@ -190,7 +190,7 @@ def build_tiny_imagenet_loader(batch_size: int, n_workers: int, split: str = "tr
     except ImportError:
         raise ImportError("pip install datasets")
 
-    ds_hf = load_dataset("zh-plus/tiny-imagenet", split=split, trust_remote_code=True)
+    ds_hf = load_dataset("zh-plus/tiny-imagenet", split=split)
 
     tfm = T.Compose([
         T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
@@ -486,8 +486,8 @@ def main():
         description="Exp 2: Trained FFN probe on SiT/REPA hidden states"
     )
     # Paths
-    parser.add_argument("--sit-root", default="/content/SiT")
-    parser.add_argument("--repa-root", default="/content/REPA")
+    parser.add_argument("--sit-root", default="./SiT")
+    parser.add_argument("--repa-root", default="./REPA")
     parser.add_argument("--sit-ckpt", default="pretrained_models/SiT-XL-2-256x256.pt")
     parser.add_argument("--repa-ckpt", default="pretrained_models/repa-last.pt")
     parser.add_argument("--outdir", default="outputs/exp2")

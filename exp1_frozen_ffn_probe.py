@@ -356,10 +356,10 @@ def main():
         description="Exp 1: Frozen FFN probing of SiT hidden states"
     )
     # Paths
-    parser.add_argument("--sit-root", default="/content/SiT",
-                        help="Path to cloned SiT repo (Colab: /content/SiT)")
-    parser.add_argument("--repa-root", default="/content/REPA",
-                        help="Path to cloned REPA repo (Colab: /content/REPA)")
+    parser.add_argument("--sit-root", default="./SiT",
+                        help="Path to cloned SiT repo (relative or absolute; default: ./SiT)")
+    parser.add_argument("--repa-root", default="./REPA",
+                        help="Path to cloned REPA repo (relative or absolute; default: ./REPA)")
     parser.add_argument("--sit-ckpt", default="pretrained_models/SiT-XL-2-256x256.pt",
                         help="Local path for SiT ckpt (auto-downloaded if absent)")
     parser.add_argument("--repa-ckpt", default="pretrained_models/repa-last.pt",
