@@ -73,32 +73,56 @@ def compute_rankings(tsv_file, model_name, out_dir):
         top_str = " | ".join([f"t={row['timestep']:.2f} ({row['score']*100:.1f}%)" for _, row in top.iterrows()])
         print(f"➤ BEST for {cat.upper()}: {top_str}")
 
-    # 3. Plotting
+    # 3. Detailed Breakdown Plotting (New)
+    fig, axes = plt.subplots(num_cats := len(categories), 1, figsize=(12, 5 * num_cats))
+    plt.style.use('dark_background')
+    fig.set_facecolor('#0a0a0a')
+    
+    for i, cat in enumerate(categories):
+        ax = axes[i]
+        cat_metrics = df[df['category'] == cat]['metric'].unique()
+        
+        for m in cat_metrics:
+            sub = df[(df['category'] == cat) & (df['metric'] == m)].groupby('layer')['score'].mean().reset_index().sort_values('layer')
+            ax.plot(sub['layer'], sub['score'] * 100, label=m.upper(), marker='o', alpha=0.8, linewidth=2)
+        
+        ax.set_title(f"{model_name}: {cat} Detailed Metrics", fontweight='bold', fontsize=14)
+        ax.set_ylabel("Normalized Score (%)")
+        ax.set_xlabel("Layer")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='upper right', frameon=True, alpha=0.5)
+        ax.set_ylim(0, 105)
+
+    plt.tight_layout()
+    out_img_detail = out_dir / f"detailed_breakdown_{model_name.replace(' ', '_').lower()}.png"
+    plt.savefig(out_img_detail, dpi=200, bbox_inches='tight', facecolor='#0a0a0a')
+    plt.close()
+    print(f"Detailed breakdown saved to {out_img_detail}")
+
+    # 4. Summary Plotting (Original style but improved)
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
     colors = {'Coarse (Semantic)': '#e74c3c', 'Fine (Texture/Local)': '#2ecc71', 'Spatial (Global Context)': '#3498db'}
     
     for cat in categories:
         sub = layer_scores[layer_scores['category'] == cat].sort_values('layer')
-        axes[0].plot(sub['layer'], sub['score'], label=cat, color=colors[cat], marker='o', linewidth=2)
-    axes[0].set_title(f"{model_name}: Roles over Layers", fontweight='bold')
+        axes[0].plot(sub['layer'], sub['score'] * 100, label=cat, color=colors[cat], marker='o', linewidth=3)
+    axes[0].set_title(f"{model_name}: Roles over Layers (Aggregated)", fontweight='bold')
+    axes[0].set_ylabel("Composite Score (%)")
     axes[0].set_xlabel("Layer")
-    axes[0].set_ylabel("Composite Score (Normalized)")
-    axes[0].grid(True, alpha=0.5)
+    axes[0].grid(True, alpha=0.3)
     axes[0].legend()
 
     for cat in categories:
         sub = step_scores[step_scores['category'] == cat].sort_values('timestep')
-        axes[1].plot(sub['timestep'], sub['score'], label=cat, color=colors[cat], marker='s', linewidth=2)
-    axes[1].set_title(f"{model_name}: Roles over Timesteps", fontweight='bold')
+        axes[1].plot(sub['timestep'], sub['score'] * 100, label=cat, color=colors[cat], marker='s', linewidth=3)
+    axes[1].set_title(f"{model_name}: Roles over Timesteps (Aggregated)", fontweight='bold')
     axes[1].set_xlabel("Timestep (t)")
-    axes[1].grid(True, alpha=0.5)
-    # Ensure x-axis doesn't break if there's only 1 point
-    axes[1].margins(x=0.1)
+    axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
     plt.tight_layout()
     out_img = out_dir / f"coarse_fine_spatial_{model_name.replace(' ', '_').lower()}.png"
-    plt.savefig(out_img, dpi=200, bbox_inches='tight', facecolor='white')
+    plt.savefig(out_img, dpi=200, bbox_inches='tight', facecolor='#0a0a0a')
     plt.close()
     print(f"\nPlot saved to {out_img}")
 
