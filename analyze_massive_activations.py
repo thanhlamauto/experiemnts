@@ -21,13 +21,13 @@ sys.path.append(str(_SCRIPT_DIR))
 from sit_metrics.model_loader import load_model
 
 @torch.no_grad()
-def get_activations(model, backend, device, layer_idx):
-    """Run one forward pass and grab activation of a specific layer."""
+def get_activations(model, backend, device, layer_idx, t_val=0.5):
+    """Run one forward pass and grab activation of a specific layer at fixed t."""
     model.eval()
     
     # Simple random input
     z = torch.randn(1, 4, 32, 32).to(device)
-    t = torch.tensor([0.5]).to(device) # mid-noise
+    t = torch.tensor([t_val]).to(device) 
     y = torch.randint(0, 1000, (1,)).to(device)
     
     activation = None
@@ -122,7 +122,8 @@ def main():
     parser.add_argument("--repa-ckpt", type=str, default=str(base_dir / "REPA/pretrained_models/last.pt"))
     parser.add_argument("--outdir", type=str, default="outputs/massive_activations")
     parser.add_argument("--layers", type=str, default="2,12,25")
-    parser.add_argument("--top-k-dims", type=int, default=1152) # Default to ALL for better overview
+    parser.add_argument("--timesteps", type=str, default="0.1,0.5,0.9")
+    parser.add_argument("--top-k-dims", type=int, default=1152) 
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -130,6 +131,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     
     layer_indices = [int(x) for x in args.layers.split(",")]
+    t_vals = [float(x) for x in args.timesteps.split(",")]
     
     # Verify ckpts
     sit_ckpt = Path(args.sit_ckpt)
@@ -160,13 +162,13 @@ def main():
             )
             
             for l_idx in layer_indices:
-                if l_idx >= len(model.blocks): 
-                    print(f"  [skip] Layer {l_idx} invalid for this model.")
-                    continue
-                print(f"  Extracting Layer {l_idx}...")
-                act = get_activations(model, backend, device, l_idx)
-                save_path = outdir / f"massive_{backend}_L{l_idx:02d}.png"
-                plot_3d_activations(act, f"{name}: Layer {l_idx} Massive Activations", save_path, top_k_dims=args.top_k_dims)
+                if l_idx >= len(model.blocks): continue
+                for tv in t_vals:
+                    print(f"  Extracting Layer {l_idx} at t={tv}...")
+                    act = get_activations(model, backend, device, l_idx, t_val=tv)
+                    t_str = f"{tv:.1f}".replace(".", "p")
+                    save_path = outdir / f"massive_{backend}_L{l_idx:02d}_t{t_str}.png"
+                    plot_3d_activations(act, f"{name}: Layer {l_idx} (t={tv}) Massive Activations", save_path, top_k_dims=args.top_k_dims)
             
             del model
             torch.cuda.empty_cache()
