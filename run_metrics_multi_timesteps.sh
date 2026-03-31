@@ -28,8 +28,10 @@ NCM_METRIC="${NCM_METRIC:-cosine}"
 SIT_CKPT="${SIT_CKPT:-$ROOT/SiT/pretrained_models/SiT-XL-2-256x256.pt}"
 REPA_CKPT="${REPA_CKPT:-$ROOT/REPA/pretrained_models/last.pt}"
 
+PYTHON="${PYTHON:-python3}"
+
 echo "== Checking checkpoints =="
-# Xoá file bị lỗi (kích thước quá nhỏ) do phiên bản wget dỏm tải nhầm HTML
+# Định dạng đường dẫn Python để gọi hàm tải chính thức từ model exp1_frozen_ffn_probe.py
 if [ -f "$SIT_CKPT" ]; then
   SIT_SIZE=$(wc -c < "$SIT_CKPT" || stat -f%z "$SIT_CKPT")
   if [ "$SIT_SIZE" -lt 1000000 ]; then rm -f "$SIT_CKPT"; fi
@@ -40,22 +42,17 @@ if [ -f "$REPA_CKPT" ]; then
   if [ "$REPA_SIZE" -lt 1000000 ]; then rm -f "$REPA_CKPT"; fi
 fi
 
-if [ ! -f "$SIT_CKPT" ]; then
-  echo "Downloading SiT checkpoint to $SIT_CKPT..."
-  mkdir -p "$(dirname "$SIT_CKPT")"
-  $PYTHON -c "import urllib.request; urllib.request.urlretrieve('https://www.dl.dropboxusercontent.com/scl/fi/as9oeomcbub47de5g4be0/SiT-XL-2-256.pt?rlkey=uxzxmpicu46coq3msb17b9ofa&dl=1', '$SIT_CKPT')"
-fi
-
-if [ ! -f "$REPA_CKPT" ]; then
-  echo "Downloading REPA checkpoint to $REPA_CKPT..."
-  mkdir -p "$(dirname "$REPA_CKPT")"
-  $PYTHON -c "import urllib.request; urllib.request.urlretrieve('https://www.dl.dropboxusercontent.com/scl/fi/cxedbs4da5ugjq5wg3zrg/last.pt?rlkey=8otgrdkno0nd89po3dpwngwcc&st=apcc645o&dl=1', '$REPA_CKPT')"
-fi
+# Gọi thẳng Python function mượt mà của file exp1
+$PYTHON -c "
+import sys
+sys.path.append('$ROOT')
+import exp1_frozen_ffn_probe as exp1
+exp1.download_sit_ckpt('$SIT_CKPT')
+exp1.download_repa_ckpt('$REPA_CKPT')
+"
 
 OUT_SIT="${OUT_SIT:-$ROOT/outputs/sit_imagenet_metrics}"
 OUT_REPA="${OUT_REPA:-$ROOT/outputs/repa_imagenet_metrics}"
-
-PYTHON="${PYTHON:-python3}"
 
 echo "== SiT (vanilla) [MULTI-TIMESTEPS] -> $OUT_SIT"
 rm -f "$OUT_SIT/metrics.tsv"
