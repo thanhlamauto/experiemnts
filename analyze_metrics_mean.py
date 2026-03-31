@@ -26,24 +26,20 @@ def analyze_tsv(path_str, model_name):
     print("\n[ 1. LAYER TRENDS (Averaged across all timesteps) ]")
     for m in metrics:
         subset = mean_by_layer[mean_by_layer['metric'] == m]
-        sorted_desc = subset.sort_values('value', ascending=False)
-        top3 = " | ".join([f"L{int(row['layer']):02d} ({row['value']:.3g})" for _, row in sorted_desc.head(3).iterrows()])
-        bottom3 = " | ".join([f"L{int(row['layer']):02d} ({row['value']:.3g})" for _, row in sorted_desc.tail(3).iterrows()])
+        sorted_asc = subset.sort_values('layer', ascending=True)
+        all_layers = " | ".join([f"L{int(row['layer']):02d}({row['value']:.3g})" for _, row in sorted_asc.iterrows()])
         
         print(f"➤ {m.upper()}")
-        print(f"    Highest (Top 3) : {top3}")
-        print(f"    Lowest (Bot 3)  : {bottom3}")
+        print(f"    All Layers: {all_layers}")
 
     print("\n[ 2. TIMESTEP TRENDS (Averaged across all layers) ]")
     for m in metrics:
         subset = mean_by_step[mean_by_step['metric'] == m]
-        sorted_desc = subset.sort_values('value', ascending=False)
-        top3 = " | ".join([f"t={row['timestep']:.2f} ({row['value']:.3g})" for _, row in sorted_desc.head(3).iterrows()])
-        bottom3 = " | ".join([f"t={row['timestep']:.2f} ({row['value']:.3g})" for _, row in sorted_desc.tail(3).iterrows()])
+        sorted_asc = subset.sort_values('timestep', ascending=True)
+        all_steps = " | ".join([f"t={row['timestep']:.2f}({row['value']:.3g})" for _, row in sorted_asc.iterrows()])
         
         print(f"➤ {m.upper()}")
-        print(f"    Highest (Top 3) : {top3}")
-        print(f"    Lowest (Bot 3)  : {bottom3}")
+        print(f"    All Timesteps: {all_steps}")
 
 if __name__ == "__main__":
     sit_file = "/Users/nguyenthanhlam/experiemnts/outputs/sit_imagenet_metrics/metrics.tsv"
