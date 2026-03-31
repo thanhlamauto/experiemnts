@@ -47,60 +47,72 @@ def get_activations(model, backend, device, layer_idx):
     handle.remove()
     return activation[0] # [T, D]
 
-def plot_3d_activations(activations, title, save_path, top_k_dims=40):
+def plot_3d_activations(activations, title, save_path, top_k_dims=1152):
     """
     activations: [T, D]
-    We visualize a subset of tokens and dimensions to match the paper style.
+    Visualizes dimensions. If D is large, use surface plot for performance.
     """
     T, D = activations.shape
     abs_act = activations.abs().numpy()
     
-    # Identify the top-k dimensions with highest maximum activation across any token
-    max_per_dim = abs_act.max(axis=0)
-    top_dims = np.argsort(-max_per_dim)[:top_k_dims]
-    top_dims = sorted(top_dims) # keep index order
-    
-    # Filter activations to only these dimensions
-    filtered_act = abs_act[:, top_dims]
-    
+    # Identify top-k dimensions if requested, otherwise take all
+    if top_k_dims < D:
+        max_per_dim = abs_act.max(axis=0)
+        top_dims = np.argsort(-max_per_dim)[:top_k_dims]
+        top_dims = sorted(top_dims)
+        filtered_act = abs_act[:, top_dims]
+    else:
+        top_dims = np.arange(D)
+        filtered_act = abs_act
+
     plt.style.use('dark_background')
-    fig = plt.figure(figsize=(14, 9))
+    fig = plt.figure(figsize=(16, 10))
     ax = fig.add_subplot(111, projection='3d')
     ax.set_facecolor('#000000')
     fig.patch.set_facecolor('#000000')
 
-    # X: tokens, Y: dimensions
-    x_pos, y_pos = np.meshgrid(np.arange(T), np.arange(len(top_dims)))
-    x_pos = x_pos.flatten()
-    y_pos = y_pos.flatten()
-    z_pos = np.zeros_like(x_pos)
+    # Create coordinate grids
+    x_tokens = np.arange(T)
+    y_dims = np.arange(len(top_dims))
+    X, Y = np.meshgrid(x_tokens, y_dims)
+    Z = filtered_act.T # [len(top_dims), T]
     
-    dx = dy = 0.8 # width of bars
-    dz = filtered_act.T.flatten() # heights
-    
-    # Color mapping based on height
-    norm = plt.Normalize(dz.min(), dz.max())
-    colors = plt.cm.viridis(norm(dz))
+    # Selection of plot type based on density
+    if len(top_dims) <= 64:
+        # Use bars for sparse visualization
+        x_pos = X.flatten()
+        y_pos = Y.flatten()
+        z_pos = np.zeros_like(x_pos)
+        dz = Z.flatten()
+        dx = dy = 0.8
+        norm = plt.Normalize(dz.min(), dz.max())
+        colors = plt.cm.viridis(norm(dz))
+        mask = dz > (dz.max() * 0.02) # Hide floor noise for speed
+        ax.bar3d(x_pos[mask], y_pos[mask], z_pos[mask], dx, dy, dz[mask], color=colors[mask], alpha=0.8, shade=True)
+    else:
+        # Use surface for dense visualization (1152 dims)
+        # Antialiasing=False makes it faster and cleaner for spiky data
+        surf = ax.plot_surface(X, Y, Z, cmap='magma', antialiased=False, linewidth=0, alpha=0.9, rstride=1, cstride=1)
+        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label='Magnitude |h|')
 
-    # To keep it fast, we only plot bars that have meaningful magnitude
-    mask = dz > (dz.max() * 0.05)
-    
-    ax.bar3d(x_pos[mask], y_pos[mask], z_pos[mask], dx, dy, dz[mask], color=colors[mask], alpha=0.8, shade=True)
-    
-    ax.set_xlabel('Patch tokens', labelpad=15, fontweight='bold')
-    ax.set_ylabel('Top Dimensions (Ranked)', labelpad=15, fontweight='bold')
+    ax.set_xlabel('Patch tokens (T)', labelpad=15, fontweight='bold')
+    ax.set_ylabel('Dimensions (D)', labelpad=15, fontweight='bold')
     ax.set_zlabel('Magnitude |h|', labelpad=15, fontweight='bold')
-    ax.set_title(title, pad=20, fontsize=16, fontweight='bold')
+    ax.set_title(title + f" (D={len(top_dims)})", pad=20, fontsize=18, fontweight='bold')
     
-    # Label the axes with actual dimension indices for the top few
-    peak_idx = np.argmax(max_per_dim)
-    ax.text2D(0.05, 0.95, f"Global Peak Dim: {peak_idx}\nMax Magnitude: {max_per_dim[peak_idx]:.2f}", 
+    # Peak info
+    peak_dim = np.argmax(abs_act.max(axis=0))
+    peak_val = abs_act[:, peak_dim].max()
+    ax.text2D(0.05, 0.95, f"Massive Spike @ Dim: {peak_dim}\nPeak Magnitude: {peak_val:.2f}", 
               transform=ax.transAxes, color='#3498db', fontsize=14, fontweight='bold')
 
+    # Dynamic camera angle to see spikes better
+    ax.view_init(elev=30, azim=-60)
+
     plt.tight_layout()
-    plt.savefig(save_path, dpi=200, bbox_inches='tight', facecolor='#000000')
+    plt.savefig(save_path, dpi=250, bbox_inches='tight', facecolor='#000000')
     plt.close()
-    print(f"Saved 3D plot to {save_path}")
+    print(f"Saved 3D plot (D={len(top_dims)}) to {save_path}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -110,6 +122,7 @@ def main():
     parser.add_argument("--repa-ckpt", type=str, default=str(base_dir / "REPA/pretrained_models/last.pt"))
     parser.add_argument("--outdir", type=str, default="outputs/massive_activations")
     parser.add_argument("--layers", type=str, default="2,12,25")
+    parser.add_argument("--top-k-dims", type=int, default=1152) # Default to ALL for better overview
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -153,12 +166,14 @@ def main():
                 print(f"  Extracting Layer {l_idx}...")
                 act = get_activations(model, backend, device, l_idx)
                 save_path = outdir / f"massive_{backend}_L{l_idx:02d}.png"
-                plot_3d_activations(act, f"{name}: Layer {l_idx} Massive Activations", save_path)
+                plot_3d_activations(act, f"{name}: Layer {l_idx} Massive Activations", save_path, top_k_dims=args.top_k_dims)
             
             del model
             torch.cuda.empty_cache()
         except Exception as e:
             print(f"[error] Failed to process {name}: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()
