@@ -68,8 +68,7 @@ def _download(url: str, dest: str) -> None:
 
 def download_sit_ckpt(dest: str = "pretrained_models/SiT-XL-2-256x256.pt") -> str:
     url = (
-        "https://www.dl.dropboxusercontent.com/scl/fi/as9oeomcbub47de5g4be0/"
-        "SiT-XL-2-256.pt?rlkey=uxzxmpicu46coq3msb17b9ofa&dl=0"
+        "https://huggingface.co/nyu-visionx/SiT-collections/resolve/main/SiT-XL-2-256.pt?download=true"
     )
     _download(url, dest)
     return dest
@@ -77,8 +76,7 @@ def download_sit_ckpt(dest: str = "pretrained_models/SiT-XL-2-256x256.pt") -> st
 
 def download_repa_ckpt(dest: str = "pretrained_models/repa-last.pt") -> str:
     url = (
-        "https://www.dl.dropboxusercontent.com/scl/fi/cxedbs4da5ugjq5wg3zrg/"
-        "last.pt?rlkey=8otgrdkno0nd89po3dpwngwcc&st=apcc645o&dl=0"
+        "https://huggingface.co/nyu-visionx/RAE-collections/resolve/main/DiTs/Dinov2/wReg_base/ImageNet256/DiTDH-XL_ep80/stage2_model.pt?download=true"
     )
     _download(url, dest)
     return dest
