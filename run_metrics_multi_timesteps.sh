@@ -7,6 +7,12 @@ IMAGENET_ROOT="${IMAGENET_ROOT:-$HOME/data/mini_imagenet_folder}"
 SEED="${SEED:-0}"
 METRICS_PRESET="${METRICS_PRESET:-full}"
 
+# Install dependencies if on Colab
+if [ -d "/content" ]; then
+  echo "== Installing dependencies for Colab =="
+  pip install datasets diffusers timm accelerate -q
+fi
+
 # Multi-timesteps configuration
 TIMESTEPS="0.1,0.3,0.5,0.7,0.9"
 

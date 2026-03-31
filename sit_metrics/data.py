@@ -11,6 +11,34 @@ from diffusers.models import AutoencoderKL
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, transforms
 
+# Fallback for when local ImageNet is missing
+class HFImageNetFallback(Dataset):
+    """Wraps HuggingFace tiny-imagenet to look like a torchvision ImageFolder."""
+    def __init__(self, split: str, transform=None):
+        from datasets import load_dataset
+        # tiny-imagenet on HF: 200 classes
+        hf_split = "train" if split == "train" else "valid"
+        print(f"[data] Local ImageNet missing. Downloading 'zh-plus/tiny-imagenet' ({hf_split}) from HF Hub...")
+        self.hf_ds = load_dataset("zh-plus/tiny-imagenet", split=hf_split)
+        self.transform = transform
+        
+        # Mimic ImageFolder attributes for sampling functions
+        self.classes = sorted(list(set(self.hf_ds["label"])))
+        self.targets = self.hf_ds["label"]
+        self.samples = [(None, t) for t in self.targets] # placeholder for path-based logic if needed
+
+    def __len__(self) -> int:
+        return len(self.hf_ds)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+        item = self.hf_ds[idx]
+        image = item["image"]
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        return image, item["label"]
+
 
 def imagenet_transform(resolution: int) -> transforms.Compose:
     return transforms.Compose(
@@ -41,8 +69,13 @@ def build_imagenet_loaders(
     train_dir = Path(root) / "train"
     val_dir = Path(root) / "val"
     tfm = imagenet_transform(resolution)
-    train_set = datasets.ImageFolder(str(train_dir), transform=tfm)
-    val_set = datasets.ImageFolder(str(val_dir), transform=tfm)
+    
+    if not train_dir.exists() or not val_dir.exists():
+        train_set = HFImageNetFallback("train", transform=tfm)
+        val_set = HFImageNetFallback("val", transform=tfm)
+    else:
+        train_set = datasets.ImageFolder(str(train_dir), transform=tfm)
+        val_set = datasets.ImageFolder(str(val_dir), transform=tfm)
     if max_train is not None and max_train < len(train_set):
         train_set = Subset(train_set, list(range(max_train)))
     if max_val is not None and max_val < len(val_set):
@@ -188,7 +221,12 @@ def build_imagenet_per_class_loader(
 ) -> Tuple[DataLoader, List[int], int]:
     """Build an ImageFolder loader with a fixed number of samples per class."""
     split_dir = Path(root) / split
-    dataset = datasets.ImageFolder(str(split_dir), transform=imagenet_transform(resolution))
+    tfm = imagenet_transform(resolution)
+    
+    if not split_dir.exists():
+        dataset = HFImageNetFallback(split, transform=tfm)
+    else:
+        dataset = datasets.ImageFolder(str(split_dir), transform=tfm)
     indices = sample_per_class_indices(dataset.targets, samples_per_class=samples_per_class, seed=subset_seed)
     loader = _build_subset_loader(dataset, indices, batch_size, num_workers, shuffle=shuffle)
     num_classes = len({int(dataset.targets[idx]) for idx in indices})
@@ -211,8 +249,15 @@ def build_imagenet_per_class_loaders(
     from a single split with disjoint per-class sampling so NCM remains well-defined.
     """
     tfm = imagenet_transform(resolution)
-    train_dataset = datasets.ImageFolder(str(Path(root) / "train"), transform=tfm)
-    val_dataset = datasets.ImageFolder(str(Path(root) / "val"), transform=tfm)
+    train_dir = Path(root) / "train"
+    val_dir = Path(root) / "val"
+    
+    if not train_dir.exists() or not val_dir.exists():
+        train_dataset = HFImageNetFallback("train", transform=tfm)
+        val_dataset = HFImageNetFallback("val", transform=tfm)
+    else:
+        train_dataset = datasets.ImageFolder(str(train_dir), transform=tfm)
+        val_dataset = datasets.ImageFolder(str(val_dir), transform=tfm)
 
     if train_dataset.classes == val_dataset.classes:
         train_indices = sample_per_class_indices(
@@ -255,7 +300,12 @@ def build_imagenet_indexed_loader(
     subset_seed: int,
 ) -> Tuple[DataLoader, List[int]]:
     split_dir = Path(root) / split
-    dataset = datasets.ImageFolder(str(split_dir), transform=imagenet_transform(resolution))
+    tfm = imagenet_transform(resolution)
+    
+    if not split_dir.exists():
+        dataset = HFImageNetFallback(split, transform=tfm)
+    else:
+        dataset = datasets.ImageFolder(str(split_dir), transform=tfm)
     indices = sample_subset_indices(len(dataset), max_samples, subset_seed)
     indexed_dataset = IndexedSubset(dataset, indices)
     loader = DataLoader(
