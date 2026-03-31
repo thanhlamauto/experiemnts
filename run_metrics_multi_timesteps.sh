@@ -28,6 +28,19 @@ NCM_METRIC="${NCM_METRIC:-cosine}"
 SIT_CKPT="${SIT_CKPT:-$ROOT/SiT/pretrained_models/SiT-XL-2-256x256.pt}"
 REPA_CKPT="${REPA_CKPT:-$ROOT/REPA/pretrained_models/last.pt}"
 
+echo "== Checking checkpoints =="
+if [ ! -f "$SIT_CKPT" ]; then
+  echo "Downloading SiT checkpoint to $SIT_CKPT..."
+  mkdir -p "$(dirname "$SIT_CKPT")"
+  wget -q -O "$SIT_CKPT" "https://www.dl.dropboxusercontent.com/scl/fi/as9oeomcbub47de5g4be0/SiT-XL-2-256.pt?rlkey=uxzxmpicu46coq3msb17b9ofa&dl=0"
+fi
+
+if [ ! -f "$REPA_CKPT" ]; then
+  echo "Downloading REPA checkpoint to $REPA_CKPT..."
+  mkdir -p "$(dirname "$REPA_CKPT")"
+  wget -q -O "$REPA_CKPT" "https://www.dl.dropboxusercontent.com/scl/fi/cxedbs4da5ugjq5wg3zrg/last.pt?rlkey=8otgrdkno0nd89po3dpwngwcc&st=apcc645o&dl=0"
+fi
+
 OUT_SIT="${OUT_SIT:-$ROOT/outputs/sit_imagenet_metrics}"
 OUT_REPA="${OUT_REPA:-$ROOT/outputs/repa_imagenet_metrics}"
 
