@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
-from timm.layers.attention import maybe_add_mask, resolve_self_attn_mask
-
 
 @torch.no_grad()
 def attention_probs_from_timm(
@@ -29,8 +27,18 @@ def attention_probs_from_timm(
     q, k = attn_module.q_norm(q), attn_module.k_norm(k)
     q = q * attn_module.scale
     attn = q @ k.transpose(-2, -1)
-    attn_bias = resolve_self_attn_mask(N, attn, attn_mask, is_causal)
-    attn = maybe_add_mask(attn, attn_bias)
+    
+    # Handle mask manually without relying on unstable timm imports
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn.masked_fill_(~attn_mask, float('-inf'))
+        else:
+            attn = attn + attn_mask
+            
+    if is_causal:
+        causal_mask = torch.triu(torch.ones(N, N, dtype=torch.bool, device=x.device), diagonal=1)
+        attn.masked_fill_(causal_mask, float('-inf'))
+
     attn = attn.softmax(dim=-1)
     return attn
 
