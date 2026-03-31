@@ -42,8 +42,10 @@ def analyze_tsv(path_str, model_name):
         print(f"    All Timesteps: {all_steps}")
 
 if __name__ == "__main__":
-    sit_file = "/Users/nguyenthanhlam/experiemnts/outputs/sit_imagenet_metrics/metrics.tsv"
-    repa_file = "/Users/nguyenthanhlam/experiemnts/outputs/repa_imagenet_metrics/metrics.tsv"
+    # Use relative paths so it works on both local and Colab
+    base_dir = Path(__file__).resolve().parent
+    sit_file = base_dir / "outputs/sit_imagenet_metrics/metrics.tsv"
+    repa_file = base_dir / "outputs/repa_imagenet_metrics/metrics.tsv"
     
     analyze_tsv(sit_file, "SiT (Vanilla)")
     analyze_tsv(repa_file, "REPA")

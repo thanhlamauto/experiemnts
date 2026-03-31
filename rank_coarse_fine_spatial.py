@@ -103,17 +103,20 @@ def compute_rankings(tsv_file, model_name, out_dir):
     print(f"\nPlot saved to {out_img}")
 
 if __name__ == '__main__':
-    sit_file = "/Users/nguyenthanhlam/experiemnts/outputs/sit_imagenet_metrics/metrics.tsv"
-    repa_file = "/Users/nguyenthanhlam/experiemnts/outputs/repa_imagenet_metrics/metrics.tsv"
+    # Use relative paths so it works on both local and Colab
+    base_dir = Path(__file__).resolve().parent
+    sit_file = base_dir / "outputs/sit_imagenet_metrics/metrics.tsv"
+    repa_file = base_dir / "outputs/repa_imagenet_metrics/metrics.tsv"
     
-    out_dir_local = Path("/Users/nguyenthanhlam/experiemnts/outputs")
+    out_dir_local = base_dir / "outputs"
     out_dir_local.mkdir(parents=True, exist_ok=True)
     
-    artifact_dir = Path("/Users/nguyenthanhlam/.gemini/antigravity/brain/7eb263dd-b701-408d-9cbb-2a643483db90")
-    
+    # Run for local outputs
     compute_rankings(sit_file, "SiT Vanilla", out_dir_local)
     compute_rankings(repa_file, "REPA", out_dir_local)
     
-    # Save mirror to artifacts for UI embedding
-    compute_rankings(sit_file, "SiT Vanilla", artifact_dir)
-    compute_rankings(repa_file, "REPA", artifact_dir)
+    # Save mirror to artifacts ONLY if the directory exists (local development)
+    artifact_dir = Path("/Users/nguyenthanhlam/.gemini/antigravity/brain/7eb263dd-b701-408d-9cbb-2a643483db90")
+    if artifact_dir.exists():
+        compute_rankings(sit_file, "SiT Vanilla", artifact_dir)
+        compute_rankings(repa_file, "REPA", artifact_dir)

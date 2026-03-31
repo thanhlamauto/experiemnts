@@ -93,7 +93,18 @@ def plot_all_metrics(sit_file, repa_file, out_dir):
     print(f"Timestep trend plot saved to: {out_path_step}")
 
 if __name__ == "__main__":
-    sit_file = "/Users/nguyenthanhlam/experiemnts/outputs/sit_imagenet_metrics/metrics.tsv"
-    repa_file = "/Users/nguyenthanhlam/experiemnts/outputs/repa_imagenet_metrics/metrics.tsv"
-    out_dir = Path("/Users/nguyenthanhlam/experiemnts/outputs")
-    plot_all_metrics(sit_file, repa_file, out_dir)
+    # Use relative paths so it works on both local and Colab
+    base_dir = Path(__file__).resolve().parent
+    sit_file = base_dir / "outputs/sit_imagenet_metrics/metrics.tsv"
+    repa_file = base_dir / "outputs/repa_imagenet_metrics/metrics.tsv"
+    
+    out_dir_local = base_dir / "outputs"
+    out_dir_local.mkdir(parents=True, exist_ok=True)
+    
+    # Run for local outputs
+    plot_all_metrics(sit_file, repa_file, out_dir_local)
+    
+    # Save mirror to artifacts ONLY if the directory exists (local development)
+    artifact_dir = Path("/Users/nguyenthanhlam/.gemini/antigravity/brain/7eb263dd-b701-408d-9cbb-2a643483db90")
+    if artifact_dir.exists():
+        plot_all_metrics(sit_file, repa_file, artifact_dir)
