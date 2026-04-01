@@ -124,6 +124,7 @@ def main():
     parser.add_argument("--layers", type=str, default="2,12,25")
     parser.add_argument("--timesteps", type=str, default="0.1,0.5,0.9")
     parser.add_argument("--top-k-dims", type=int, default=1152) 
+    parser.add_argument("--backends", type=str, default="sit,repa", help="sit, repa, or sit,repa")
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -132,21 +133,24 @@ def main():
     
     layer_indices = [int(x) for x in args.layers.split(",")]
     t_vals = [float(x) for x in args.timesteps.split(",")]
+    selected_backends = [b.strip().lower() for b in args.backends.split(",")]
     
     # Verify ckpts
     sit_ckpt = Path(args.sit_ckpt)
     repa_ckpt = Path(args.repa_ckpt)
     
     configs = []
-    if sit_ckpt.exists():
-        configs.append(('sit', str(sit_ckpt), "SiT Vanilla"))
-    else:
-        print(f"[skip] SiT ckpt not found at {sit_ckpt}")
+    if 'sit' in selected_backends:
+        if sit_ckpt.exists():
+            configs.append(('sit', str(sit_ckpt), "SiT Vanilla"))
+        else:
+            print(f"[skip] SiT ckpt not found at {sit_ckpt}")
         
-    if repa_ckpt.exists():
-        configs.append(('repa', str(repa_ckpt), "REPA"))
-    else:
-        print(f"[skip] REPA ckpt not found at {repa_ckpt}")
+    if 'repa' in selected_backends:
+        if repa_ckpt.exists():
+            configs.append(('repa', str(repa_ckpt), "REPA"))
+        else:
+            print(f"[skip] REPA ckpt not found at {repa_ckpt}")
     
     for backend, ckpt, name in configs:
         print(f"\n{'='*40}\nProcessing {name}...\n{'='*40}")
