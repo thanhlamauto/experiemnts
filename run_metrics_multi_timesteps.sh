@@ -16,7 +16,7 @@ fi
 # Multi-timesteps configuration
 TIMESTEPS="0.1,0.3,0.5,0.7,0.9"
 
-FULL_METRICS="sanity,linear,knn,cka,cknna,nc1,ncm_acc,etf_dev,participation_ratio,effective_rank,mad,entropy,decay,hf"
+FULL_METRICS="sanity,linear,knn,cka,cknna,nc1,ncm_acc,etf_dev,participation_ratio,effective_rank,mad,entropy,decay,hf,miou,objectness"
 GEOMETRY_ONLY_METRICS="nc1,ncm_acc,etf_dev,participation_ratio,effective_rank"
 if [[ -z "${METRICS:-}" ]]; then
   case "$METRICS_PRESET" in

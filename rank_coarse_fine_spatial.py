@@ -8,7 +8,7 @@ from pathlib import Path
 # Categories mapping (Updated for full 15+ metrics)
 COARSE = ['cka', 'cknna', 'linear_top1', 'knn_acc', 'ncm_acc', 'nc1_dev', 'etf_dev', 'participation_ratio', 'effective_rank']
 FINE = ['hf_ratio', 'decay_slope']
-SPATIAL = ['mad', 'entropy']
+SPATIAL = ['mad', 'entropy', 'miou', 'objectness']
 
 # Which metrics need inverted normalization (lower value meant stronger expression of that property)
 # decay_slope is negative, lower (more negative) means stronger local detail decay.
