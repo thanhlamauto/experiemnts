@@ -73,74 +73,59 @@ def compute_rankings(tsv_file, model_name, out_dir):
         top_str = " | ".join([f"t={row['timestep']:.2f} ({row['score']*100:.1f}%)" for _, row in top.iterrows()])
         print(f"➤ BEST for {cat.upper()}: {top_str}")
 
-    # 3. Detailed Breakdown Plotting (New)
-    fig, axes = plt.subplots(num_cats := len(categories), 1, figsize=(12, 5 * num_cats))
+    # 3. Comprehensive Breakdown Plotting (3 rows x 2 cols)
     plt.style.use('dark_background')
-    fig.set_facecolor('#0a0a0a')
+    fig, axes = plt.subplots(num_cats := len(categories), 2, figsize=(20, 6 * num_cats))
+    fig.patch.set_facecolor('#050505')
     
+    # Custom color palette for metrics
+    colors_pool = ['#ff7f0e', '#2ca02c', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#1f77b4']
+
     for i, cat in enumerate(categories):
-        ax = axes[i]
+        # --- LEFT: METRIC vs LAYER ---
+        ax_l = axes[i, 0]
         cat_metrics = df[df['category'] == cat]['metric'].unique()
         
-        for m in cat_metrics:
+        for m_idx, m in enumerate(cat_metrics):
             sub = df[(df['category'] == cat) & (df['metric'] == m)].groupby('layer')['score'].mean().reset_index().sort_values('layer')
-            ax.plot(sub['layer'], sub['score'] * 100, label=m.upper(), marker='o', alpha=0.8, linewidth=2)
+            ax_l.plot(sub['layer'], sub['score'] * 100, label=m.upper(), 
+                     marker='o', alpha=0.9, linewidth=3, color=colors_pool[m_idx % len(colors_pool)])
         
-        ax.set_title(f"{model_name}: {cat} Detailed Metrics", fontweight='bold', fontsize=14)
-        ax.set_ylabel("Normalized Score (%)")
-        ax.set_xlabel("Layer")
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right', frameon=True, alpha=0.5)
-        ax.set_ylim(0, 105)
+        ax_l.set_title(f"{cat}: Metrics vs Layer", fontweight='bold', fontsize=16, color='white')
+        ax_l.set_ylabel("Normalized Score (%)", fontsize=12)
+        ax_l.set_xlabel("Layer Index", fontsize=12)
+        ax_l.grid(True, alpha=0.15, linestyle='--')
+        ax_l.legend(loc='best', frameon=True, fontsize=10)
+        ax_l.set_ylim(-5, 105)
 
+        # --- RIGHT: METRIC vs TIMESTEP ---
+        ax_r = axes[i, 1]
+        for m_idx, m in enumerate(cat_metrics):
+            sub = df[(df['category'] == cat) & (df['metric'] == m)].groupby('timestep')['score'].mean().reset_index().sort_values('timestep')
+            ax_r.plot(sub['timestep'], sub['score'] * 100, label=m.upper(), 
+                     marker='s', alpha=0.9, linewidth=3, color=colors_pool[m_idx % len(colors_pool)])
+        
+        ax_r.set_title(f"{cat}: Metrics vs Timestep (Noise)", fontweight='bold', fontsize=16, color='cyan')
+        ax_r.set_xlabel("Timestep (t)", fontsize=12)
+        ax_r.grid(True, alpha=0.15, linestyle='--')
+        ax_r.legend(loc='best', frameon=True, fontsize=10)
+        ax_r.set_ylim(-5, 105)
+
+    plt.suptitle(f"Surgical Metric Analysis: {model_name.upper()}", fontsize=24, fontweight='bold', y=1.02)
     plt.tight_layout()
-    out_img_detail = out_dir / f"detailed_breakdown_{model_name.replace(' ', '_').lower()}.png"
-    plt.savefig(out_img_detail, dpi=200, bbox_inches='tight', facecolor='#0a0a0a')
-    plt.close()
-    print(f"Detailed breakdown saved to {out_img_detail}")
-
-    # 4. Summary Plotting (Original style but improved)
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    colors = {'Coarse (Semantic)': '#e74c3c', 'Fine (Texture/Local)': '#2ecc71', 'Spatial (Global Context)': '#3498db'}
     
-    for cat in categories:
-        sub = layer_scores[layer_scores['category'] == cat].sort_values('layer')
-        axes[0].plot(sub['layer'], sub['score'] * 100, label=cat, color=colors[cat], marker='o', linewidth=3)
-    axes[0].set_title(f"{model_name}: Roles over Layers (Aggregated)", fontweight='bold')
-    axes[0].set_ylabel("Composite Score (%)")
-    axes[0].set_xlabel("Layer")
-    axes[0].grid(True, alpha=0.3)
-    axes[0].legend()
-
-    for cat in categories:
-        sub = step_scores[step_scores['category'] == cat].sort_values('timestep')
-        axes[1].plot(sub['timestep'], sub['score'] * 100, label=cat, color=colors[cat], marker='s', linewidth=3)
-    axes[1].set_title(f"{model_name}: Roles over Timesteps (Aggregated)", fontweight='bold')
-    axes[1].set_xlabel("Timestep (t)")
-    axes[1].grid(True, alpha=0.3)
-    axes[1].legend()
-
-    plt.tight_layout()
-    out_img = out_dir / f"coarse_fine_spatial_{model_name.replace(' ', '_').lower()}.png"
-    plt.savefig(out_img, dpi=200, bbox_inches='tight', facecolor='#0a0a0a')
+    out_img_detail = out_dir / f"surgical_breakdown_{model_name.replace(' ', '_').lower()}.png"
+    plt.savefig(out_img_detail, dpi=150, bbox_inches='tight', facecolor='#050505')
     plt.close()
-    print(f"\nPlot saved to {out_img}")
+    print(f"Surgical breakdown saved to {out_img_detail}")
 
 if __name__ == '__main__':
-    # Use relative paths so it works on both local and Colab
     base_dir = Path(__file__).resolve().parent
     sit_file = base_dir / "outputs/sit_imagenet_metrics/metrics.tsv"
     repa_file = base_dir / "outputs/repa_imagenet_metrics/metrics.tsv"
     
-    out_dir_local = base_dir / "outputs"
+    out_dir_local = base_dir / "outputs/visualizations"
     out_dir_local.mkdir(parents=True, exist_ok=True)
     
-    # Run for local outputs
     compute_rankings(sit_file, "SiT Vanilla", out_dir_local)
     compute_rankings(repa_file, "REPA", out_dir_local)
-    
-    # Save mirror to artifacts ONLY if the directory exists (local development)
-    artifact_dir = Path("/Users/nguyenthanhlam/.gemini/antigravity/brain/7eb263dd-b701-408d-9cbb-2a643483db90")
-    if artifact_dir.exists():
-        compute_rankings(sit_file, "SiT Vanilla", artifact_dir)
-        compute_rankings(repa_file, "REPA", artifact_dir)
