@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
-# Categories mapping
-COARSE = ['cka', 'cknna', 'linear_top1', 'ncm_acc', 'participation_ratio', 'effective_rank']
+# Categories mapping (Updated for full 15+ metrics)
+COARSE = ['cka', 'cknna', 'linear_top1', 'knn_acc', 'ncm_acc', 'nc1_dev', 'etf_dev', 'participation_ratio', 'effective_rank']
 FINE = ['hf_ratio', 'decay_slope']
 SPATIAL = ['mad', 'entropy']
-LOWER_IS_BETTER = ['decay_slope']
+LOWER_IS_BETTER = ['decay_slope', 'nc1_dev', 'etf_dev']
 
 def normalize_metric(df):
     df_norm = df.copy()

@@ -5,8 +5,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# Categories mapping
-COARSE = ['cka', 'cknna', 'linear_top1', 'ncm_acc', 'participation_ratio', 'effective_rank']
+# Categories mapping (Updated for full 15+ metrics)
+COARSE = ['cka', 'cknna', 'linear_top1', 'knn_acc', 'ncm_acc', 'nc1_dev', 'etf_dev', 'participation_ratio', 'effective_rank']
 FINE = ['hf_ratio', 'decay_slope']
 SPATIAL = ['mad', 'entropy']
 
