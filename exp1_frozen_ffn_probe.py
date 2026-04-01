@@ -74,9 +74,9 @@ def download_sit_ckpt(dest: str = "pretrained_models/SiT-XL-2-256x256.pt") -> st
     return dest
 
 
-def download_repa_ckpt(dest: str = "pretrained_models/repa-last.pt") -> str:
+def download_repa_ckpt(dest: str = "pretrained_models/last.pt") -> str:
     url = (
-        "https://huggingface.co/nyu-visionx/RAE-collections/resolve/main/DiTs/Dinov2/wReg_base/ImageNet256/DiTDH-XL_ep80/stage2_model.pt?download=true"
+        "https://www.dl.dropboxusercontent.com/scl/fi/cxedbs4da5ugjq5wg3zrg/last.pt?rlkey=8otgrdkno0nd89po3dpwngwcc&st=apcc645o&dl=1"
     )
     _download(url, dest)
     return dest
