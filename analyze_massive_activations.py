@@ -110,7 +110,8 @@ def plot_3d_activations(activations, title, save_path, top_k_dims=1152):
     ax.view_init(elev=30, azim=-60)
 
     plt.tight_layout()
-    plt.savefig(save_path, dpi=250, bbox_inches='tight', facecolor='#000000')
+    # Remove bbox_inches='tight' to ensure uniform pixel dimensions for all plots
+    plt.savefig(save_path, dpi=250, facecolor='#000000')
     plt.close()
     print(f"Saved 3D plot (D={len(top_dims)}) to {save_path}")
 
