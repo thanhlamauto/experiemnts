@@ -111,6 +111,28 @@ def ensure_haste_checkpoint(destination: Path) -> None:
         _stream_download(response, destination)
 
 
+def choose_runtime_device() -> torch.device:
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+
+    try:
+        major, minor = torch.cuda.get_device_capability(0)
+        supported_arches = set(torch.cuda.get_arch_list())
+    except Exception as exc:
+        print(f"[warn] Failed to validate CUDA runtime ({exc}); falling back to CPU")
+        return torch.device("cpu")
+
+    sm = f"sm_{major}{minor}"
+    if supported_arches and sm not in supported_arches:
+        print(
+            f"[warn] CUDA device capability {sm} is not supported by this PyTorch build "
+            f"({', '.join(sorted(supported_arches))}); falling back to CPU"
+        )
+        return torch.device("cpu")
+
+    return torch.device("cuda")
+
+
 @torch.no_grad()
 def get_activations(model, backend, device, layer_idx, t_val=0.5):
     """Run one forward pass and grab activation of a specific layer at fixed t."""
@@ -219,9 +241,14 @@ def main():
     parser.add_argument("--timesteps", type=str, default="0.1,0.5,0.9")
     parser.add_argument("--top-k-dims", type=int, default=1152) 
     parser.add_argument("--backends", type=str, default="sit,repa", help="Comma-separated: sit, repa, haste")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     args = parser.parse_args()
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device == "auto":
+        device = choose_runtime_device()
+    else:
+        device = torch.device(args.device)
+    print(f"[info] using device={device}")
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import importlib.util
+import pickle
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -30,7 +32,20 @@ def strip_module_prefix(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.
 
 
 def load_checkpoint_raw(path: str, map_location: str = "cpu") -> Dict[str, torch.Tensor]:
-    obj = torch.load(path, map_location=map_location)
+    try:
+        obj = torch.load(path, map_location=map_location)
+    except pickle.UnpicklingError as exc:
+        # PyTorch 2.6+ defaults torch.load(..., weights_only=True). Some REPA/HASTE
+        # checkpoints include argparse.Namespace in the training metadata, so we
+        # allowlist it when reloading trusted local checkpoints.
+        if "argparse.Namespace" not in str(exc):
+            raise
+        safe_globals = getattr(torch.serialization, "safe_globals", None)
+        if safe_globals is None:
+            obj = torch.load(path, map_location=map_location, weights_only=False)
+        else:
+            with safe_globals([argparse.Namespace]):
+                obj = torch.load(path, map_location=map_location)
     if isinstance(obj, dict):
         if "ema" in obj and isinstance(obj["ema"], dict):
             return obj["ema"]
