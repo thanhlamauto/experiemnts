@@ -1,24 +1,115 @@
 #!/usr/bin/env python3
 """
-Visualize Massive Activations (Outlier Dimensions) in SiT and REPA.
+Visualize Massive Activations (Outlier Dimensions) in SiT-family checkpoints.
 Inspired by the SD3.5 Massive Activations analysis.
 Produces 3D plots of [Tokens x Dimensions] for specific layers.
 """
 
 import argparse
-import os
+import html
+import re
 import sys
 from pathlib import Path
+
+import requests
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-# Add local paths for SiT and REPA
+# Add local project path
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(_SCRIPT_DIR))
 
 from sit_metrics.model_loader import load_model
+
+
+HASTE_SIT_XL2_FILE_ID = "1XS3jAU7LDoCzYrjIHB99MO_v7M33fYNT"
+HASTE_SIT_XL2_FILENAME = "2500000.pt"
+HASTE_SIT_XL2_VIEW_URL = (
+    "https://drive.google.com/file/d/1XS3jAU7LDoCzYrjIHB99MO_v7M33fYNT/view?usp=drivesdk"
+)
+HASTE_SIT_XL2_FOLDER_URL = "https://drive.google.com/drive/folders/10YUH9ljtqr6-3REu1vgvQTOui9EJDZtl"
+
+
+def _parse_drive_download_form(page_text: str) -> tuple[str | None, dict[str, str]]:
+    action_match = re.search(r'<form id="download-form" action="([^"]+)" method="get">', page_text)
+    hidden_inputs = {
+        name: html.unescape(value)
+        for name, value in re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', page_text)
+    }
+    action = html.unescape(action_match.group(1)) if action_match else None
+    return action, hidden_inputs
+
+
+def _stream_download(response: requests.Response, destination: Path) -> None:
+    response.raise_for_status()
+    total = int(response.headers.get("Content-Length") or 0)
+    tmp_path = destination.with_suffix(destination.suffix + ".part")
+    report_every = 512 * 1024 * 1024
+    next_report = report_every
+    written = 0
+
+    try:
+        with tmp_path.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                written += len(chunk)
+                if total and written >= next_report:
+                    pct = 100.0 * written / total
+                    print(
+                        f"[download] {destination.name}: "
+                        f"{written / (1024 ** 3):.2f} / {total / (1024 ** 3):.2f} GiB ({pct:.1f}%)"
+                    )
+                    next_report += report_every
+        tmp_path.replace(destination)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+
+    if total:
+        print(f"[download] {destination.name}: completed {written / (1024 ** 3):.2f} GiB")
+    else:
+        print(f"[download] {destination.name}: completed")
+
+
+def ensure_haste_checkpoint(destination: Path) -> None:
+    if destination.exists():
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    initial_url = f"https://drive.google.com/uc?export=download&id={HASTE_SIT_XL2_FILE_ID}"
+    print(
+        f"[download] HASTE SiT-XL/2 checkpoint not found at {destination}\n"
+        f"[download] Source file: {HASTE_SIT_XL2_VIEW_URL}\n"
+        f"[download] Source folder: {HASTE_SIT_XL2_FOLDER_URL}"
+    )
+
+    with requests.Session() as session:
+        response = session.get(initial_url, stream=True, timeout=60)
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "").lower()
+        content_disposition = response.headers.get("Content-Disposition", "")
+
+        if "text/html" in content_type or not content_disposition:
+            page_text = response.text
+            response.close()
+            action, params = _parse_drive_download_form(page_text)
+            if not action or not params:
+                raise RuntimeError("Could not extract Google Drive confirmation form for HASTE checkpoint")
+            response = session.get(action, params=params, stream=True, timeout=60)
+            response.raise_for_status()
+
+        final_content_type = response.headers.get("Content-Type", "").lower()
+        if "text/html" in final_content_type:
+            preview = response.text[:200].strip().replace("\n", " ")
+            raise RuntimeError(f"Unexpected HTML response while downloading HASTE checkpoint: {preview}")
+
+        _stream_download(response, destination)
+
 
 @torch.no_grad()
 def get_activations(model, backend, device, layer_idx, t_val=0.5):
@@ -121,11 +212,13 @@ def main():
     base_dir = Path(__file__).resolve().parent
     parser.add_argument("--sit-ckpt", type=str, default=str(base_dir / "SiT/pretrained_models/SiT-XL-2-256x256.pt"))
     parser.add_argument("--repa-ckpt", type=str, default=str(base_dir / "REPA/pretrained_models/last.pt"))
+    parser.add_argument("--haste-ckpt", type=str, default=str(base_dir / "HASTE/pretrained_models/2500000.pt"))
+    parser.add_argument("--haste-root", type=str, default=str(base_dir / "HASTE"))
     parser.add_argument("--outdir", type=str, default="outputs/massive_activations")
     parser.add_argument("--layers", type=str, default="2,12,25")
     parser.add_argument("--timesteps", type=str, default="0.1,0.5,0.9")
     parser.add_argument("--top-k-dims", type=int, default=1152) 
-    parser.add_argument("--backends", type=str, default="sit,repa", help="sit, repa, or sit,repa")
+    parser.add_argument("--backends", type=str, default="sit,repa", help="Comma-separated: sit, repa, haste")
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -139,28 +232,72 @@ def main():
     # Verify ckpts
     sit_ckpt = Path(args.sit_ckpt)
     repa_ckpt = Path(args.repa_ckpt)
+    haste_ckpt = Path(args.haste_ckpt)
+    haste_root = Path(args.haste_root)
+
+    if "haste" in selected_backends and haste_root.exists() and not haste_ckpt.exists():
+        try:
+            ensure_haste_checkpoint(haste_ckpt)
+        except Exception as exc:
+            print(f"[warn] Failed to auto-download HASTE checkpoint: {exc}")
     
     configs = []
     if 'sit' in selected_backends:
         if sit_ckpt.exists():
-            configs.append(('sit', str(sit_ckpt), "SiT Vanilla"))
+            configs.append(
+                {
+                    "save_backend": "sit",
+                    "load_backend": "sit",
+                    "ckpt": str(sit_ckpt),
+                    "name": "SiT Vanilla",
+                    "repa_root": str(base_dir / "REPA"),
+                }
+            )
         else:
             print(f"[skip] SiT ckpt not found at {sit_ckpt}")
         
     if 'repa' in selected_backends:
         if repa_ckpt.exists():
-            configs.append(('repa', str(repa_ckpt), "REPA"))
+            configs.append(
+                {
+                    "save_backend": "repa",
+                    "load_backend": "repa",
+                    "ckpt": str(repa_ckpt),
+                    "name": "REPA",
+                    "repa_root": str(base_dir / "REPA"),
+                }
+            )
         else:
             print(f"[skip] REPA ckpt not found at {repa_ckpt}")
+
+    if 'haste' in selected_backends:
+        if not haste_root.exists():
+            print(f"[skip] HASTE repo root not found at {haste_root}")
+        elif haste_ckpt.exists():
+            configs.append(
+                {
+                    "save_backend": "haste",
+                    "load_backend": "repa",
+                    "ckpt": str(haste_ckpt),
+                    "name": "HASTE",
+                    "repa_root": str(haste_root),
+                }
+            )
+        else:
+            print(f"[skip] HASTE ckpt not found at {haste_ckpt}")
     
-    for backend, ckpt, name in configs:
+    for config in configs:
+        backend = config["save_backend"]
+        load_backend = config["load_backend"]
+        ckpt = config["ckpt"]
+        name = config["name"]
         print(f"\n{'='*40}\nProcessing {name}...\n{'='*40}")
         try:
             model = load_model(
-                backend=backend,
+                backend=load_backend,
                 ckpt=ckpt,
                 sit_root=str(base_dir / "SiT"),
-                repa_root=str(base_dir / "REPA"),
+                repa_root=config["repa_root"],
                 device=device,
                 encoder_depth=8,
                 projector_embed_dims="768"
