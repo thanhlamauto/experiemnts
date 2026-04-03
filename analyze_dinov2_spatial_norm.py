@@ -38,6 +38,11 @@ import torch
 import torch.nn.functional as F
 from PIL import Image, ImageFilter
 
+try:
+    import pywt
+except ImportError:
+    pywt = None
+
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -372,10 +377,48 @@ def center_crop_square(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + side, top + side))
 
 
-def preprocess_pil_image(image: Image.Image, image_size: int, blur_radius: float = 0.0) -> Image.Image:
+def preprocess_pil_image(
+    image: Image.Image,
+    image_size: int,
+    blur_radius: float = 0.0,
+    wavelet_mode: str | None = None,
+    wavelet_name: str = "haar",
+) -> Image.Image:
     image = center_crop_square(image).resize((image_size, image_size), resample=Image.BICUBIC)
     if blur_radius > 0:
         image = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    if wavelet_mode in ("low", "high"):
+        if pywt is None:
+            raise ImportError("PyWavelets is required for wavelet filtering. Run: pip install PyWavelets")
+
+        arr = np.asarray(image, dtype=np.float32) / 255.0
+        channels = []
+        for i in range(3):
+            c = arr[:, :, i]
+            # Use 1-level DWT to split low/high frequencies
+            coeffs = pywt.wavedec2(c, wavelet_name, level=1)
+            cA, (cH, cV, cD) = coeffs
+            if wavelet_mode == "low":
+                # Keep only LL (approximation)
+                new_coeffs = [cA, (np.zeros_like(cH), np.zeros_like(cV), np.zeros_like(cD))]
+            else:  # high
+                # Keep only Details
+                new_coeffs = [np.zeros_like(cA), (cH, cV, cD)]
+
+            recon = pywt.waverec2(new_coeffs, wavelet_name)
+            # Ensure output shape matches in case of padding/odd dimensions
+            recon = recon[: c.shape[0], : c.shape[1]]
+            channels.append(recon)
+
+        res = np.stack(channels, axis=-1)
+        if wavelet_mode == "high":
+            # Shift high-frequency detail for better visualization in [0, 1] range
+            res = (res + 0.5).clip(0, 1)
+        else:
+            res = res.clip(0, 1)
+        image = Image.fromarray((res * 255).astype(np.uint8))
+
     return image
 
 
@@ -386,9 +429,17 @@ def load_and_prepare_image(
     std: Iterable[float],
     _device: torch.device,
     blur_radius: float = 0.0,
+    wavelet_mode: str | None = None,
+    wavelet_name: str = "haar",
 ) -> tuple[np.ndarray, np.ndarray]:
     image = Image.open(image_path).convert("RGB")
-    image = preprocess_pil_image(image, image_size=image_size, blur_radius=blur_radius)
+    image = preprocess_pil_image(
+        image,
+        image_size=image_size,
+        blur_radius=blur_radius,
+        wavelet_mode=wavelet_mode,
+        wavelet_name=wavelet_name,
+    )
 
     display = np.asarray(image, dtype=np.float32) / 255.0
     tensor = torch.from_numpy(display).permute(2, 0, 1).contiguous()
@@ -528,6 +579,8 @@ def build_condition_record(
     anchor_points_xy: list[tuple[float, float]] | None = None,
     gamma: float = 1.0,
     blur_radius: float = 0.0,
+    wavelet_mode: str | None = None,
+    wavelet_name: str = "haar",
     apply_spatial_norm: bool = False,
 ) -> dict[str, object]:
     display_image, pixel_values = load_and_prepare_image(
@@ -537,6 +590,8 @@ def build_condition_record(
         std,
         device,
         blur_radius=blur_radius,
+        wavelet_mode=wavelet_mode,
+        wavelet_name=wavelet_name,
     )
     tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
     grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
@@ -573,6 +628,8 @@ def build_visualization_record(
     device: torch.device,
     compare_gaussian_blur: bool,
     blur_radius: float,
+    compare_wavelet: bool = False,
+    wavelet_name: str = "haar",
 ) -> dict[str, object]:
     baseline = build_condition_record(
         title="Original Input",
@@ -614,6 +671,24 @@ def build_visualization_record(
                 blur_radius=blur_radius,
             )
         )
+
+    if compare_wavelet:
+        for mode in ("low", "high"):
+            label = "Low Freq" if mode == "low" else "High Freq"
+            conditions.append(
+                build_condition_record(
+                    title=f"DWT {label} ({wavelet_name})",
+                    model_bundle=model_bundle,
+                    image_path=image_path,
+                    image_size=image_size,
+                    mean=mean,
+                    std=std,
+                    device=device,
+                    anchors_rc=baseline["anchors_rc"],
+                    wavelet_mode=mode,
+                    wavelet_name=wavelet_name,
+                )
+            )
 
     record = {
         "image_path": image_path,
@@ -794,6 +869,17 @@ def parse_args() -> argparse.Namespace:
         default=4.0,
         help="Gaussian blur radius used when --compare-gaussian-blur is enabled.",
     )
+    parser.add_argument(
+        "--compare-wavelet",
+        action="store_true",
+        help="Add comparison groups for wavelet low-frequency and high-frequency filtering.",
+    )
+    parser.add_argument(
+        "--wavelet-name",
+        type=str,
+        default="haar",
+        help="Wavelet name for --compare-wavelet (e.g., 'haar', 'db1', 'sym2').",
+    )
     parser.add_argument("--image-size", type=int, default=None, help="Square input resolution after crop/resize.")
     parser.add_argument("--device", type=str, default="auto", help="auto, cpu, cuda, cuda:0, ...")
     parser.add_argument(
@@ -852,6 +938,8 @@ def main() -> None:
                 device=device,
                 compare_gaussian_blur=args.compare_gaussian_blur,
                 blur_radius=args.blur_radius,
+                compare_wavelet=args.compare_wavelet,
+                wavelet_name=args.wavelet_name,
             )
         )
 
