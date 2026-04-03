@@ -9,6 +9,7 @@ from urllib.error import URLError
 
 import numpy as np
 import torch
+from PIL import Image
 
 from analyze_dinov2_spatial_norm import (
     _looks_like_ssl_verification_error,
@@ -19,6 +20,7 @@ from analyze_dinov2_spatial_norm import (
     model_spec_to_local_path,
     normalized_anchor_to_grid,
     parse_anchor_points,
+    preprocess_pil_image,
     resolve_anchor_specs,
     spatial_normalize_tokens,
 )
@@ -97,6 +99,17 @@ class Dinov2SpatialNormExperimentTests(unittest.TestCase):
             root = Path(tmpdir)
             self.assertEqual(model_spec_to_local_path(str(root)), root)
         self.assertIsNone(model_spec_to_local_path("facebook/dinov2-base"))
+
+    def test_preprocess_pil_image_gaussian_blur_changes_pixels(self) -> None:
+        image_arr = np.zeros((32, 32, 3), dtype=np.uint8)
+        image_arr[:, :16, :] = 255
+        image = Image.fromarray(image_arr)
+
+        sharp = np.asarray(preprocess_pil_image(image, image_size=32, blur_radius=0.0))
+        blurred = np.asarray(preprocess_pil_image(image, image_size=32, blur_radius=3.0))
+
+        self.assertTrue(np.array_equal(sharp, image_arr))
+        self.assertFalse(np.array_equal(sharp, blurred))
 
 
 if __name__ == "__main__":

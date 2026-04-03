@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -372,15 +372,23 @@ def center_crop_square(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + side, top + side))
 
 
+def preprocess_pil_image(image: Image.Image, image_size: int, blur_radius: float = 0.0) -> Image.Image:
+    image = center_crop_square(image).resize((image_size, image_size), resample=Image.BICUBIC)
+    if blur_radius > 0:
+        image = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    return image
+
+
 def load_and_prepare_image(
     image_path: Path,
     image_size: int,
     mean: Iterable[float],
     std: Iterable[float],
     _device: torch.device,
+    blur_radius: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     image = Image.open(image_path).convert("RGB")
-    image = center_crop_square(image).resize((image_size, image_size), resample=Image.BICUBIC)
+    image = preprocess_pil_image(image, image_size=image_size, blur_radius=blur_radius)
 
     display = np.asarray(image, dtype=np.float32) / 255.0
     tensor = torch.from_numpy(display).permute(2, 0, 1).contiguous()
@@ -507,6 +515,53 @@ def compute_similarity_maps(
     return similarity_maps
 
 
+def build_condition_record(
+    *,
+    title: str,
+    model_bundle,
+    image_path: Path,
+    image_size: int,
+    mean: Iterable[float],
+    std: Iterable[float],
+    device: torch.device,
+    anchors_rc: list[tuple[int, int]] | None = None,
+    anchor_points_xy: list[tuple[float, float]] | None = None,
+    gamma: float = 1.0,
+    blur_radius: float = 0.0,
+    apply_spatial_norm: bool = False,
+) -> dict[str, object]:
+    display_image, pixel_values = load_and_prepare_image(
+        image_path,
+        image_size,
+        mean,
+        std,
+        device,
+        blur_radius=blur_radius,
+    )
+    tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
+    grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
+
+    if anchors_rc is None:
+        if anchor_points_xy is None:
+            raise ValueError("Either anchors_rc or anchor_points_xy must be provided")
+        anchors_rc = [normalized_anchor_to_grid(anchor, grid_width, grid_height) for anchor in anchor_points_xy]
+
+    if apply_spatial_norm:
+        tokens = spatial_normalize_tokens(tokens.unsqueeze(0), gamma=gamma)[0]
+
+    return {
+        "title": title,
+        "display_image": display_image,
+        "grid_shape": (grid_height, grid_width),
+        "anchors_rc": anchors_rc,
+        "anchors_px": [
+            anchor_center_in_pixels(anchor_rc, image_size, grid_width, grid_height)
+            for anchor_rc in anchors_rc
+        ],
+        "sim_maps": compute_similarity_maps(tokens, anchors_rc, grid_width, grid_height),
+    }
+
+
 def build_visualization_record(
     model_bundle,
     image_path: Path,
@@ -516,28 +571,55 @@ def build_visualization_record(
     std: Iterable[float],
     gamma: float,
     device: torch.device,
+    compare_gaussian_blur: bool,
+    blur_radius: float,
 ) -> dict[str, object]:
-    display_image, pixel_values = load_and_prepare_image(image_path, image_size, mean, std, device)
-    tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
-    grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
-    anchors_rc = [normalized_anchor_to_grid(anchor, grid_width, grid_height) for anchor in anchor_points_xy]
+    baseline = build_condition_record(
+        title="Original Input",
+        model_bundle=model_bundle,
+        image_path=image_path,
+        image_size=image_size,
+        mean=mean,
+        std=std,
+        device=device,
+        anchor_points_xy=anchor_points_xy,
+    )
+
+    conditions = [
+        baseline,
+        build_condition_record(
+            title="Spatial Normalization",
+            model_bundle=model_bundle,
+            image_path=image_path,
+            image_size=image_size,
+            mean=mean,
+            std=std,
+            device=device,
+            anchors_rc=baseline["anchors_rc"],
+            gamma=gamma,
+            apply_spatial_norm=True,
+        ),
+    ]
+    if compare_gaussian_blur:
+        conditions.append(
+            build_condition_record(
+                title=f"Gaussian Blur Input (r={blur_radius:g})",
+                model_bundle=model_bundle,
+                image_path=image_path,
+                image_size=image_size,
+                mean=mean,
+                std=std,
+                device=device,
+                anchors_rc=baseline["anchors_rc"],
+                blur_radius=blur_radius,
+            )
+        )
 
     record = {
         "image_path": image_path,
-        "display_image": display_image,
-        "grid_shape": (grid_height, grid_width),
-        "anchors_rc": anchors_rc,
-        "anchors_px": [
-            anchor_center_in_pixels(anchor_rc, image_size, grid_width, grid_height)
-            for anchor_rc in anchors_rc
-        ],
-        "sim_wo": compute_similarity_maps(tokens, anchors_rc, grid_width, grid_height),
-        "sim_w": compute_similarity_maps(
-            spatial_normalize_tokens(tokens.unsqueeze(0), gamma=gamma)[0],
-            anchors_rc,
-            grid_width,
-            grid_height,
-        ),
+        "grid_shape": baseline["grid_shape"],
+        "anchors_rc": baseline["anchors_rc"],
+        "conditions": conditions,
     }
     return record
 
@@ -545,8 +627,8 @@ def build_visualization_record(
 def collect_color_limits(records: list[dict[str, object]]) -> tuple[float, float]:
     values: list[np.ndarray] = []
     for record in records:
-        values.extend(record["sim_wo"])
-        values.extend(record["sim_w"])
+        for condition in record["conditions"]:
+            values.extend(condition["sim_maps"])
     stacked = np.concatenate([arr.reshape(-1) for arr in values], axis=0)
     vmin = float(np.min(stacked))
     vmax = float(np.max(stacked))
@@ -599,68 +681,67 @@ def plot_similarity_figure(
         raise ValueError("No records to plot")
 
     num_rows = len(records)
-    num_anchors = len(records[0]["anchors_rc"])
-    total_cols = 2 * (1 + num_anchors) + 2
-    width_ratios = [1.0] * (1 + num_anchors) + [0.18] + [1.0] * (1 + num_anchors) + [0.08]
+    num_anchors = len(records[0]["conditions"][0]["anchors_rc"])
+    num_groups = len(records[0]["conditions"])
+    group_cols = 1 + num_anchors
+    spacer_width = 0.18
+    width_ratios: list[float] = []
+    for group_idx in range(num_groups):
+        width_ratios.extend([1.0] * group_cols)
+        if group_idx != num_groups - 1:
+            width_ratios.append(spacer_width)
+    width_ratios.append(0.08)
+    total_cols = len(width_ratios)
 
     fig = plt.figure(figsize=(2.35 * total_cols, 2.55 * num_rows), constrained_layout=False)
     gs = fig.add_gridspec(num_rows, total_cols, width_ratios=width_ratios, wspace=0.05, hspace=0.08)
 
-    left_group_cols = 1 + num_anchors
-    right_group_start = left_group_cols + 1
     cbar_ax = fig.add_subplot(gs[:, -1])
 
     if not hide_titles:
         width_total = float(sum(width_ratios))
-        left_center = sum(width_ratios[:left_group_cols]) / width_total / 2.0
-        right_offset = sum(width_ratios[:right_group_start]) / width_total
-        right_width = sum(width_ratios[right_group_start : right_group_start + left_group_cols]) / width_total
-        right_center = right_offset + right_width / 2.0
-        fig.text(
-            left_center,
-            0.995,
-            "w/o Spatial Normalization Layer",
-            ha="center",
-            va="top",
-            fontsize=title_size,
-        )
-        fig.text(
-            right_center,
-            0.995,
-            "w/ Spatial Normalization Layer",
-            ha="center",
-            va="top",
-            fontsize=title_size,
-        )
+        current_col = 0
+        group_titles = [condition["title"] for condition in records[0]["conditions"]]
+        for group_idx, group_title in enumerate(group_titles):
+            group_width = sum(width_ratios[current_col : current_col + group_cols]) / width_total
+            group_offset = sum(width_ratios[:current_col]) / width_total
+            group_center = group_offset + group_width / 2.0
+            fig.text(
+                group_center,
+                0.995,
+                group_title,
+                ha="center",
+                va="top",
+                fontsize=title_size,
+            )
+            current_col += group_cols
+            if group_idx != num_groups - 1:
+                current_col += 1
 
     vmin, vmax = collect_color_limits(records)
     last_im = None
 
     for row_index, record in enumerate(records):
-        image = record["display_image"]
-        anchors_px = record["anchors_px"]
-        anchors_rc = record["anchors_rc"]
-        sim_wo = record["sim_wo"]
-        sim_w = record["sim_w"]
+        current_col = 0
+        for group_idx, condition in enumerate(record["conditions"]):
+            image = condition["display_image"]
+            anchors_px = condition["anchors_px"]
+            anchors_rc = condition["anchors_rc"]
+            sim_maps = condition["sim_maps"]
 
-        ax = fig.add_subplot(gs[row_index, 0])
-        add_anchor_overlay_to_image(ax, image, anchors_px, star_size)
+            ax = fig.add_subplot(gs[row_index, current_col])
+            add_anchor_overlay_to_image(ax, image, anchors_px, star_size)
 
-        for anchor_idx, heatmap in enumerate(sim_wo, start=1):
-            ax = fig.add_subplot(gs[row_index, anchor_idx])
-            last_im = ax.imshow(heatmap, cmap=cmap, vmin=vmin, vmax=vmax)
-            add_anchor_overlay_to_heatmap(ax, heatmap, anchors_rc[anchor_idx - 1], star_size)
+            for anchor_idx, heatmap in enumerate(sim_maps, start=1):
+                ax = fig.add_subplot(gs[row_index, current_col + anchor_idx])
+                last_im = ax.imshow(heatmap, cmap=cmap, vmin=vmin, vmax=vmax)
+                add_anchor_overlay_to_heatmap(ax, heatmap, anchors_rc[anchor_idx - 1], star_size)
 
-        spacer_ax = fig.add_subplot(gs[row_index, left_group_cols])
-        spacer_ax.axis("off")
-
-        ax = fig.add_subplot(gs[row_index, right_group_start])
-        add_anchor_overlay_to_image(ax, image, anchors_px, star_size)
-
-        for anchor_idx, heatmap in enumerate(sim_w, start=1):
-            ax = fig.add_subplot(gs[row_index, right_group_start + anchor_idx])
-            last_im = ax.imshow(heatmap, cmap=cmap, vmin=vmin, vmax=vmax)
-            add_anchor_overlay_to_heatmap(ax, heatmap, anchors_rc[anchor_idx - 1], star_size)
+            current_col += group_cols
+            if group_idx != num_groups - 1:
+                spacer_ax = fig.add_subplot(gs[row_index, current_col])
+                spacer_ax.axis("off")
+                current_col += 1
 
     if last_im is None:
         raise ValueError("Failed to create similarity maps")
@@ -702,6 +783,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--gamma", type=float, default=1.0, help="Spatial normalization strength.")
+    parser.add_argument(
+        "--compare-gaussian-blur",
+        action="store_true",
+        help="Add a third comparison group with Gaussian blur applied to the input image before DINOv2.",
+    )
+    parser.add_argument(
+        "--blur-radius",
+        type=float,
+        default=4.0,
+        help="Gaussian blur radius used when --compare-gaussian-blur is enabled.",
+    )
     parser.add_argument("--image-size", type=int, default=None, help="Square input resolution after crop/resize.")
     parser.add_argument("--device", type=str, default="auto", help="auto, cpu, cuda, cuda:0, ...")
     parser.add_argument(
@@ -758,6 +850,8 @@ def main() -> None:
                 std=std,
                 gamma=args.gamma,
                 device=device,
+                compare_gaussian_blur=args.compare_gaussian_blur,
+                blur_radius=args.blur_radius,
             )
         )
 
