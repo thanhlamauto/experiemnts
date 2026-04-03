@@ -383,6 +383,8 @@ def preprocess_pil_image(
     blur_radius: float = 0.0,
     wavelet_mode: str | None = None,
     wavelet_name: str = "haar",
+    wavelet_level: int = 1,
+    wavelet_strength: float = 1.0,
 ) -> Image.Image:
     image = center_crop_square(image).resize((image_size, image_size), resample=Image.BICUBIC)
     if blur_radius > 0:
@@ -396,19 +398,27 @@ def preprocess_pil_image(
         channels = []
         for i in range(3):
             c = arr[:, :, i]
-            # Use 1-level DWT to split low/high frequencies
-            coeffs = pywt.wavedec2(c, wavelet_name, level=1)
-            cA, (cH, cV, cD) = coeffs
+            # Decompose into multi-level DWT
+            coeffs = pywt.wavedec2(c, wavelet_name, level=wavelet_level)
+            cA = coeffs[0]
+            details = coeffs[1:]
+
             if wavelet_mode == "low":
-                # Keep only LL (approximation)
-                new_coeffs = [cA, (np.zeros_like(cH), np.zeros_like(cV), np.zeros_like(cD))]
+                # Keep only approximation at deepest level, zero out all detail coefficients
+                new_details = [tuple(np.zeros_like(di) for di in d) for d in details]
+                new_coeffs = [cA] + new_details
             else:  # high
-                # Keep only Details
-                new_coeffs = [np.zeros_like(cA), (cH, cV, cD)]
+                # Zero out the lowest-frequency approximation
+                new_details = details
+                new_coeffs = [np.zeros_like(cA)] + new_details
 
             recon = pywt.waverec2(new_coeffs, wavelet_name)
             # Ensure output shape matches in case of padding/odd dimensions
             recon = recon[: c.shape[0], : c.shape[1]]
+
+            # Apply strength by blending with original image
+            if wavelet_strength < 1.0:
+                recon = (1.0 - wavelet_strength) * c + wavelet_strength * recon
             channels.append(recon)
 
         res = np.stack(channels, axis=-1)
@@ -431,6 +441,8 @@ def load_and_prepare_image(
     blur_radius: float = 0.0,
     wavelet_mode: str | None = None,
     wavelet_name: str = "haar",
+    wavelet_level: int = 1,
+    wavelet_strength: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     image = Image.open(image_path).convert("RGB")
     image = preprocess_pil_image(
@@ -439,6 +451,8 @@ def load_and_prepare_image(
         blur_radius=blur_radius,
         wavelet_mode=wavelet_mode,
         wavelet_name=wavelet_name,
+        wavelet_level=wavelet_level,
+        wavelet_strength=wavelet_strength,
     )
 
     display = np.asarray(image, dtype=np.float32) / 255.0
@@ -581,6 +595,8 @@ def build_condition_record(
     blur_radius: float = 0.0,
     wavelet_mode: str | None = None,
     wavelet_name: str = "haar",
+    wavelet_level: int = 1,
+    wavelet_strength: float = 1.0,
     apply_spatial_norm: bool = False,
 ) -> dict[str, object]:
     display_image, pixel_values = load_and_prepare_image(
@@ -592,6 +608,8 @@ def build_condition_record(
         blur_radius=blur_radius,
         wavelet_mode=wavelet_mode,
         wavelet_name=wavelet_name,
+        wavelet_level=wavelet_level,
+        wavelet_strength=wavelet_strength,
     )
     tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
     grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
@@ -630,6 +648,8 @@ def build_visualization_record(
     blur_radius: float,
     compare_wavelet: bool = False,
     wavelet_name: str = "haar",
+    wavelet_level: int = 1,
+    wavelet_strength: float = 1.0,
 ) -> dict[str, object]:
     baseline = build_condition_record(
         title="Original Input",
@@ -677,7 +697,7 @@ def build_visualization_record(
             label = "Low Freq" if mode == "low" else "High Freq"
             conditions.append(
                 build_condition_record(
-                    title=f"DWT {label} ({wavelet_name})",
+                    title=f"DWT {label} ({wavelet_name}, level={wavelet_level}, str={wavelet_strength:g})",
                     model_bundle=model_bundle,
                     image_path=image_path,
                     image_size=image_size,
@@ -687,6 +707,8 @@ def build_visualization_record(
                     anchors_rc=baseline["anchors_rc"],
                     wavelet_mode=mode,
                     wavelet_name=wavelet_name,
+                    wavelet_level=wavelet_level,
+                    wavelet_strength=wavelet_strength,
                 )
             )
 
@@ -880,6 +902,18 @@ def parse_args() -> argparse.Namespace:
         default="haar",
         help="Wavelet name for --compare-wavelet (e.g., 'haar', 'db1', 'sym2').",
     )
+    parser.add_argument(
+        "--wavelet-level",
+        type=int,
+        default=1,
+        help="Number of wavelet decomposition levels (higher = more aggressive filtering).",
+    )
+    parser.add_argument(
+        "--wavelet-strength",
+        type=float,
+        default=1.0,
+        help="Blending strength for wavelet filter (0.0=original, 1.0=full filter).",
+    )
     parser.add_argument("--image-size", type=int, default=None, help="Square input resolution after crop/resize.")
     parser.add_argument("--device", type=str, default="auto", help="auto, cpu, cuda, cuda:0, ...")
     parser.add_argument(
@@ -940,6 +974,8 @@ def main() -> None:
                 blur_radius=args.blur_radius,
                 compare_wavelet=args.compare_wavelet,
                 wavelet_name=args.wavelet_name,
+                wavelet_level=args.wavelet_level,
+                wavelet_strength=args.wavelet_strength,
             )
         )
 
