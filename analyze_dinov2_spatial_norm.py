@@ -16,10 +16,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
+import shutil
+import ssl
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlparse
-from urllib.request import urlretrieve
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import matplotlib
 
@@ -85,7 +88,24 @@ def is_http_url(value: str) -> bool:
     return value.startswith("http://") or value.startswith("https://")
 
 
-def download_image_url(image_url: str, download_dir: Path) -> Path:
+def _looks_like_ssl_verification_error(exc: Exception) -> bool:
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return True
+    if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return True
+    return "CERTIFICATE_VERIFY_FAILED" in str(exc)
+
+
+def _download_url_to_path(image_url: str, local_path: Path, ssl_context=None) -> None:
+    request = Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, context=ssl_context) as response:
+        with local_path.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+
+
+def download_image_url(image_url: str, download_dir: Path, allow_insecure_download: bool) -> Path:
     parsed = urlparse(image_url)
     suffix = Path(parsed.path).suffix.lower()
     if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
@@ -99,17 +119,46 @@ def download_image_url(image_url: str, download_dir: Path) -> Path:
     download_dir.mkdir(parents=True, exist_ok=True)
     print(f"[info] Downloading image from {image_url}")
     try:
-        urlretrieve(image_url, local_path)
+        _download_url_to_path(image_url, local_path)
     except Exception as exc:
+        if allow_insecure_download and _looks_like_ssl_verification_error(exc):
+            print("[warn] SSL verification failed; retrying download without certificate verification")
+            try:
+                _download_url_to_path(
+                    image_url,
+                    local_path,
+                    ssl_context=ssl._create_unverified_context(),
+                )
+                return local_path
+            except Exception as retry_exc:
+                raise SystemExit(
+                    f"Failed to download image from {image_url} even with insecure SSL retry: {retry_exc}"
+                ) from retry_exc
+        if _looks_like_ssl_verification_error(exc):
+            raise SystemExit(
+                f"Failed to download image from {image_url}: {exc}\n"
+                "The remote host has an invalid SSL certificate. "
+                "If you trust this image source, rerun with --allow-insecure-download."
+            ) from exc
         raise SystemExit(f"Failed to download image from {image_url}: {exc}") from exc
     return local_path
 
 
-def materialize_image_specs(image_specs: list[str], download_dir: Path) -> list[Path]:
+def materialize_image_specs(
+    image_specs: list[str],
+    download_dir: Path,
+    allow_insecure_download: bool,
+) -> list[Path]:
     image_paths: list[Path] = []
     for image_spec in image_specs:
         if is_http_url(image_spec):
-            image_paths.append(download_image_url(image_spec, download_dir))
+            image_paths.append(
+                download_image_url(
+                    image_spec,
+                    download_dir,
+                    allow_insecure_download=allow_insecure_download,
+                )
+            )
         else:
             image_paths.append(Path(image_spec))
     return image_paths
@@ -485,6 +534,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cmap", type=str, default="viridis")
     parser.add_argument("--title-size", type=float, default=17.0)
     parser.add_argument("--star-size", type=float, default=95.0)
+    parser.add_argument(
+        "--allow-insecure-download",
+        action="store_true",
+        help="Retry URL downloads without SSL certificate verification if the remote host is misconfigured.",
+    )
     parser.add_argument("--hide-titles", action="store_true")
     return parser.parse_args()
 
@@ -494,7 +548,11 @@ def main() -> None:
 
     model_root = Path(args.model_root)
     output_path = Path(args.output)
-    image_paths = materialize_image_specs(args.image, output_path.parent / "_downloads")
+    image_paths = materialize_image_specs(
+        args.image,
+        output_path.parent / "_downloads",
+        allow_insecure_download=args.allow_insecure_download,
+    )
     for image_path in image_paths:
         if not image_path.exists():
             raise SystemExit(f"Image not found: {image_path}")
