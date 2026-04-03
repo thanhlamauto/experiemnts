@@ -16,6 +16,7 @@ from analyze_dinov2_spatial_norm import (
     find_local_flax_pickle,
     grid_size_from_tokens,
     infer_dinov2_config_kwargs_from_name,
+    model_spec_to_local_path,
     normalized_anchor_to_grid,
     parse_anchor_points,
     resolve_anchor_specs,
@@ -90,6 +91,12 @@ class Dinov2SpatialNormExperimentTests(unittest.TestCase):
             (root / "notes.txt").write_text("x")
             found = find_local_flax_pickle(root)
             self.assertEqual(found, target)
+
+    def test_model_spec_to_local_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.assertEqual(model_spec_to_local_path(str(root)), root)
+        self.assertIsNone(model_spec_to_local_path("facebook/dinov2-base"))
 
 
 if __name__ == "__main__":

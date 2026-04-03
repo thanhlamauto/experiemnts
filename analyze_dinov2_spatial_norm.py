@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Visualize DINOv2 patch-token similarity before and after spatial normalization.
 
-This script is intended for Kaggle usage with a local Hugging Face-style Flax checkpoint,
-for example:
+This script is intended for Kaggle usage with either:
+
+  - a Hugging Face repo id such as `facebook/dinov2-base`, or
+  - a local Hugging Face-style Flax checkpoint directory, for example:
 
   /kaggle/input/datasets/bangchi/dinov2-vitb14-flax
 
-It loads the local DINOv2 checkpoint with `transformers`, converts Flax weights to a
-PyTorch `Dinov2Model` when needed, extracts patch tokens, and reproduces the paper-style
+It loads the DINOv2 checkpoint with `transformers`, falls back to a local `.pkl`
+Flax pytree when needed, extracts patch tokens, and reproduces the paper-style
 visualization of cosine-similarity maps with and without spatial normalization.
 """
 
@@ -54,6 +56,13 @@ def resolve_device(device_name: str) -> torch.device:
     return torch.device("cpu")
 
 
+def model_spec_to_local_path(model_spec: str) -> Path | None:
+    path = Path(model_spec)
+    if path.exists():
+        return path
+    return None
+
+
 def infer_dinov2_config_kwargs_from_name(name: str) -> dict[str, float | int]:
     lower = name.lower()
     common = {
@@ -91,7 +100,9 @@ def infer_dinov2_config_kwargs_from_name(name: str) -> dict[str, float | int]:
     }
 
 
-def find_local_flax_pickle(model_root: Path) -> Path | None:
+def find_local_flax_pickle(model_root: Path | None) -> Path | None:
+    if model_root is None:
+        return None
     if model_root.is_file() and model_root.suffix.lower() == ".pkl":
         return model_root
     if not model_root.is_dir():
@@ -171,7 +182,7 @@ def load_pickled_flax_dinov2_model(pkl_path: Path):
     )
 
 
-def load_local_dinov2_model(model_root: Path, device: torch.device):
+def load_local_dinov2_model(model_spec: str, device: torch.device):
     try:
         from transformers import AutoImageProcessor, Dinov2Model
     except ImportError as exc:  # pragma: no cover
@@ -179,17 +190,20 @@ def load_local_dinov2_model(model_root: Path, device: torch.device):
             "transformers is required. On Kaggle run: pip install -q transformers"
         ) from exc
 
+    model_root = model_spec_to_local_path(model_spec)
     flax_pkl = find_local_flax_pickle(model_root)
     processor = None
     try:
-        if model_root.is_dir():
+        if model_root is not None and model_root.is_dir():
             processor = AutoImageProcessor.from_pretrained(str(model_root), local_files_only=True)
+        else:
+            processor = AutoImageProcessor.from_pretrained(model_spec)
     except Exception as exc:
-        print(f"[warn] Failed to load AutoImageProcessor from {model_root}: {exc}")
+        print(f"[warn] Failed to load AutoImageProcessor from {model_spec}: {exc}")
 
     last_error: Exception | None = None
 
-    if model_root.is_dir():
+    if model_root is not None and model_root.is_dir():
         for from_flax in (True, False):
             try:
                 model = Dinov2Model.from_pretrained(
@@ -210,11 +224,26 @@ def load_local_dinov2_model(model_root: Path, device: torch.device):
                 )
             except Exception as exc:
                 last_error = exc
+    elif model_root is None:
+        try:
+            model = Dinov2Model.from_pretrained(model_spec)
+            model.eval().to(device)
+            print(f"[info] Loaded DINOv2 checkpoint from Hugging Face Hub: {model_spec}")
+            return SimpleNamespace(
+                backend="torch",
+                model=model,
+                processor=processor,
+                params=None,
+                config=model.config,
+                source_path=model_spec,
+            )
+        except Exception as exc:
+            last_error = exc
 
     if flax_pkl is not None:
         return load_pickled_flax_dinov2_model(flax_pkl)
 
-    raise SystemExit(f"Failed to load DINOv2 checkpoint from {model_root}: {last_error}")
+    raise SystemExit(f"Failed to load DINOv2 checkpoint from {model_spec}: {last_error}")
 
 
 def is_http_url(value: str) -> bool:
@@ -651,8 +680,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-root",
         type=str,
-        default="/kaggle/input/datasets/bangchi/dinov2-vitb14-flax",
-        help="Local Hugging Face checkpoint directory for DINOv2 ViT-B/14 Flax weights.",
+        default="facebook/dinov2-base",
+        help="Hugging Face repo id or local checkpoint path for DINOv2.",
     )
     parser.add_argument(
         "--image",
@@ -697,7 +726,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    model_root = Path(args.model_root)
     output_path = Path(args.output)
     image_paths = materialize_image_specs(
         args.image,
@@ -712,7 +740,7 @@ def main() -> None:
     device = resolve_device(args.device)
     print(f"[info] Using device: {device}")
 
-    model_bundle = load_local_dinov2_model(model_root, device)
+    model_bundle = load_local_dinov2_model(args.model_root, device)
     image_size = infer_image_size(model_bundle.processor, model_bundle.config, args.image_size)
     mean, std = infer_mean_std(model_bundle.processor)
     print(f"[info] Image size: {image_size} | mean: {mean} | std: {std}")
