@@ -504,6 +504,45 @@ def spatial_normalize_tokens(tokens: torch.Tensor, gamma: float = 1.0, eps: floa
     return tokens
 
 
+def wavelet_filter_tokens(
+    tokens: torch.Tensor,
+    grid_shape: tuple[int, int],
+    wavelet_name: str,
+    mode: str,
+    level: int,
+    strength: float,
+) -> torch.Tensor:
+    if pywt is None:
+        raise ImportError("PyWavelets is required for latent filtering. Run: pip install PyWavelets")
+
+    H, W = grid_shape
+    N, D = tokens.shape
+    device = tokens.device
+    # Shape: [H, W, D]
+    feat_map = tokens.view(H, W, D).detach().cpu().numpy()
+
+    # Apply DWT along spatial axes (0, 1), broadcasting across D dimension
+    coeffs = pywt.wavedec2(feat_map, wavelet_name, level=level, axes=(0, 1))
+    cA = coeffs[0]
+    details = coeffs[1:]
+
+    if mode == "low":
+        # Keep only approximation at deepest level
+        new_details = [tuple(np.zeros_like(di) for di in layer) for layer in details]
+        new_coeffs = [cA] + new_details
+    else:  # high
+        # Keep only details
+        new_coeffs = [np.zeros_like(cA)] + details
+
+    recon = pywt.waverec2(new_coeffs, wavelet_name, axes=(0, 1))
+    recon = recon[:H, :W, :]
+
+    if strength < 1.0:
+        recon = (1.0 - strength) * feat_map + strength * recon
+
+    return torch.from_numpy(recon).float().reshape(N, D).to(device)
+
+
 def parse_anchor_points(spec: str | None) -> list[tuple[float, float]]:
     if spec is None or not spec.strip():
         return [(float(x), float(y)) for x, y in DEFAULT_ANCHORS]
@@ -597,6 +636,7 @@ def build_condition_record(
     wavelet_name: str = "haar",
     wavelet_level: int = 1,
     wavelet_strength: float = 1.0,
+    latent_wavelet_mode: str | None = None,
     apply_spatial_norm: bool = False,
 ) -> dict[str, object]:
     display_image, pixel_values = load_and_prepare_image(
@@ -613,6 +653,16 @@ def build_condition_record(
     )
     tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
     grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
+
+    if latent_wavelet_mode in ("low", "high"):
+        tokens = wavelet_filter_tokens(
+            tokens,
+            (grid_height, grid_width),
+            wavelet_name,
+            latent_wavelet_mode,
+            wavelet_level,
+            wavelet_strength,
+        )
 
     if anchors_rc is None:
         if anchor_points_xy is None:
@@ -647,6 +697,7 @@ def build_visualization_record(
     compare_gaussian_blur: bool,
     blur_radius: float,
     compare_wavelet: bool = False,
+    compare_latent_wavelet: bool = False,
     wavelet_name: str = "haar",
     wavelet_level: int = 1,
     wavelet_strength: float = 1.0,
@@ -706,6 +757,26 @@ def build_visualization_record(
                     device=device,
                     anchors_rc=baseline["anchors_rc"],
                     wavelet_mode=mode,
+                    wavelet_name=wavelet_name,
+                    wavelet_level=wavelet_level,
+                    wavelet_strength=wavelet_strength,
+                )
+            )
+
+    if compare_latent_wavelet:
+        for mode in ("low", "high"):
+            label = "Low Freq" if mode == "low" else "High Freq"
+            conditions.append(
+                build_condition_record(
+                    title=f"Latent {label} ({wavelet_name})",
+                    model_bundle=model_bundle,
+                    image_path=image_path,
+                    image_size=image_size,
+                    mean=mean,
+                    std=std,
+                    device=device,
+                    anchors_rc=baseline["anchors_rc"],
+                    latent_wavelet_mode=mode,
                     wavelet_name=wavelet_name,
                     wavelet_level=wavelet_level,
                     wavelet_strength=wavelet_strength,
@@ -909,6 +980,11 @@ def parse_args() -> argparse.Namespace:
         help="Number of wavelet decomposition levels (higher = more aggressive filtering).",
     )
     parser.add_argument(
+        "--compare-latent-wavelet",
+        action="store_true",
+        help="Add comparison groups for wavelet filtering applied to the DINOv2 latent feature map.",
+    )
+    parser.add_argument(
         "--wavelet-strength",
         type=float,
         default=1.0,
@@ -973,6 +1049,7 @@ def main() -> None:
                 compare_gaussian_blur=args.compare_gaussian_blur,
                 blur_radius=args.blur_radius,
                 compare_wavelet=args.compare_wavelet,
+                compare_latent_wavelet=args.compare_latent_wavelet,
                 wavelet_name=args.wavelet_name,
                 wavelet_level=args.wavelet_level,
                 wavelet_strength=args.wavelet_strength,
