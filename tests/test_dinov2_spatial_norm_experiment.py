@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 import ssl
+import tempfile
 import unittest
+from pathlib import Path
 from urllib.error import URLError
 
 import numpy as np
@@ -11,7 +13,9 @@ import torch
 from analyze_dinov2_spatial_norm import (
     _looks_like_ssl_verification_error,
     compute_similarity_maps,
+    find_local_flax_pickle,
     grid_size_from_tokens,
+    infer_dinov2_config_kwargs_from_name,
     normalized_anchor_to_grid,
     parse_anchor_points,
     resolve_anchor_specs,
@@ -70,6 +74,22 @@ class Dinov2SpatialNormExperimentTests(unittest.TestCase):
         wrapped = URLError(direct)
         self.assertTrue(_looks_like_ssl_verification_error(direct))
         self.assertTrue(_looks_like_ssl_verification_error(wrapped))
+
+    def test_infer_dinov2_config_kwargs_from_name_for_vitb14(self) -> None:
+        kwargs = infer_dinov2_config_kwargs_from_name("dinov2_vitb14_flax.pkl")
+        self.assertEqual(kwargs["hidden_size"], 768)
+        self.assertEqual(kwargs["num_hidden_layers"], 12)
+        self.assertEqual(kwargs["num_attention_heads"], 12)
+        self.assertEqual(kwargs["patch_size"], 14)
+
+    def test_find_local_flax_pickle_in_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "dinov2_vitb14_flax.pkl"
+            target.write_bytes(b"pickle")
+            (root / "notes.txt").write_text("x")
+            found = find_local_flax_pickle(root)
+            self.assertEqual(found, target)
 
 
 if __name__ == "__main__":

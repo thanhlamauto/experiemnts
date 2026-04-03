@@ -16,9 +16,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
+import pickle
 import shutil
 import ssl
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable
 from urllib.parse import urlparse
 from urllib.error import URLError
@@ -52,6 +54,123 @@ def resolve_device(device_name: str) -> torch.device:
     return torch.device("cpu")
 
 
+def infer_dinov2_config_kwargs_from_name(name: str) -> dict[str, float | int]:
+    lower = name.lower()
+    common = {
+        "image_size": 224,
+        "patch_size": 14,
+        "num_channels": 3,
+        "layer_norm_eps": 1e-6,
+    }
+    if "vits14" in lower or "small" in lower:
+        return {
+            **common,
+            "hidden_size": 384,
+            "num_hidden_layers": 12,
+            "num_attention_heads": 6,
+        }
+    if "vitl14" in lower or "large" in lower:
+        return {
+            **common,
+            "hidden_size": 1024,
+            "num_hidden_layers": 24,
+            "num_attention_heads": 16,
+        }
+    if "vitg14" in lower or "giant" in lower:
+        return {
+            **common,
+            "hidden_size": 1536,
+            "num_hidden_layers": 40,
+            "num_attention_heads": 24,
+        }
+    return {
+        **common,
+        "hidden_size": 768,
+        "num_hidden_layers": 12,
+        "num_attention_heads": 12,
+    }
+
+
+def find_local_flax_pickle(model_root: Path) -> Path | None:
+    if model_root.is_file() and model_root.suffix.lower() == ".pkl":
+        return model_root
+    if not model_root.is_dir():
+        return None
+    pkl_files = sorted(model_root.glob("*.pkl"))
+    if len(pkl_files) == 1:
+        return pkl_files[0]
+    if len(pkl_files) > 1:
+        for candidate in pkl_files:
+            if "dinov2" in candidate.name.lower():
+                return candidate
+        return pkl_files[0]
+    return None
+
+
+def unwrap_pickled_flax_params(obj):
+    try:
+        from flax.core import FrozenDict
+        from flax.core.frozen_dict import unfreeze
+        from flax.traverse_util import unflatten_dict
+    except ImportError:
+        FrozenDict = None
+        unfreeze = None
+        unflatten_dict = None
+
+    if FrozenDict is not None and isinstance(obj, FrozenDict):
+        obj = unfreeze(obj)
+
+    if hasattr(obj, "params"):
+        obj = obj.params
+
+    if isinstance(obj, dict):
+        for key in ("params", "state_dict", "model"):
+            if key in obj and len(obj[key]) > 0:
+                obj = obj[key]
+                break
+
+    if isinstance(obj, dict) and unflatten_dict is not None:
+        if obj and all(isinstance(key, tuple) for key in obj):
+            obj = unflatten_dict(obj)
+        elif obj and all(isinstance(key, str) and "/" in key for key in obj):
+            flat = {tuple(key.split("/")): value for key, value in obj.items()}
+            obj = unflatten_dict(flat)
+
+    return obj
+
+
+def load_pickled_flax_dinov2_model(pkl_path: Path):
+    try:
+        import jax
+        import jax.numpy as jnp
+        from transformers import Dinov2Config, FlaxDinov2Model
+    except ImportError as exc:  # pragma: no cover
+        raise SystemExit(
+            "Loading a .pkl Flax checkpoint requires transformers, jax, and flax."
+        ) from exc
+
+    with pkl_path.open("rb") as handle:
+        payload = pickle.load(handle)
+    params = unwrap_pickled_flax_params(payload)
+    params = jax.tree_util.tree_map(
+        lambda value: jnp.asarray(value) if isinstance(value, np.ndarray) else value,
+        params,
+    )
+
+    config = Dinov2Config(**infer_dinov2_config_kwargs_from_name(pkl_path.name))
+    model = FlaxDinov2Model(config, _do_init=False)
+    backend = jax.default_backend()
+    print(f"[info] Loaded pickled Flax DINOv2 checkpoint from {pkl_path} (jax backend: {backend})")
+    return SimpleNamespace(
+        backend="flax_pkl",
+        model=model,
+        processor=None,
+        params=params,
+        config=config,
+        source_path=pkl_path,
+    )
+
+
 def load_local_dinov2_model(model_root: Path, device: torch.device):
     try:
         from transformers import AutoImageProcessor, Dinov2Model
@@ -60,26 +179,40 @@ def load_local_dinov2_model(model_root: Path, device: torch.device):
             "transformers is required. On Kaggle run: pip install -q transformers"
         ) from exc
 
+    flax_pkl = find_local_flax_pickle(model_root)
     processor = None
     try:
-        processor = AutoImageProcessor.from_pretrained(str(model_root), local_files_only=True)
+        if model_root.is_dir():
+            processor = AutoImageProcessor.from_pretrained(str(model_root), local_files_only=True)
     except Exception as exc:
         print(f"[warn] Failed to load AutoImageProcessor from {model_root}: {exc}")
 
     last_error: Exception | None = None
-    for from_flax in (True, False):
-        try:
-            model = Dinov2Model.from_pretrained(
-                str(model_root),
-                from_flax=from_flax,
-                local_files_only=True,
-            )
-            model.eval().to(device)
-            load_mode = "flax" if from_flax else "pytorch"
-            print(f"[info] Loaded DINOv2 checkpoint from {model_root} ({load_mode} weights)")
-            return model, processor
-        except Exception as exc:
-            last_error = exc
+
+    if model_root.is_dir():
+        for from_flax in (True, False):
+            try:
+                model = Dinov2Model.from_pretrained(
+                    str(model_root),
+                    from_flax=from_flax,
+                    local_files_only=True,
+                )
+                model.eval().to(device)
+                load_mode = "flax" if from_flax else "pytorch"
+                print(f"[info] Loaded DINOv2 checkpoint from {model_root} ({load_mode} weights)")
+                return SimpleNamespace(
+                    backend="torch",
+                    model=model,
+                    processor=processor,
+                    params=None,
+                    config=model.config,
+                    source_path=model_root,
+                )
+            except Exception as exc:
+                last_error = exc
+
+    if flax_pkl is not None:
+        return load_pickled_flax_dinov2_model(flax_pkl)
 
     raise SystemExit(f"Failed to load DINOv2 checkpoint from {model_root}: {last_error}")
 
@@ -215,8 +348,8 @@ def load_and_prepare_image(
     image_size: int,
     mean: Iterable[float],
     std: Iterable[float],
-    device: torch.device,
-) -> tuple[np.ndarray, torch.Tensor]:
+    _device: torch.device,
+) -> tuple[np.ndarray, np.ndarray]:
     image = Image.open(image_path).convert("RGB")
     image = center_crop_square(image).resize((image_size, image_size), resample=Image.BICUBIC)
 
@@ -225,17 +358,35 @@ def load_and_prepare_image(
 
     mean_t = torch.tensor(tuple(mean), dtype=tensor.dtype).view(3, 1, 1)
     std_t = torch.tensor(tuple(std), dtype=tensor.dtype).view(3, 1, 1)
-    pixel_values = ((tensor - mean_t) / std_t).unsqueeze(0).to(device)
+    pixel_values = ((tensor - mean_t) / std_t).unsqueeze(0).cpu().numpy()
     return display, pixel_values
 
 
 @torch.no_grad()
-def extract_patch_tokens(model: torch.nn.Module, pixel_values: torch.Tensor) -> torch.Tensor:
-    outputs = model(pixel_values=pixel_values)
-    hidden = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
-    if hidden.ndim != 3 or hidden.shape[1] < 2:
-        raise ValueError(f"Unexpected DINOv2 hidden state shape: {tuple(hidden.shape)}")
-    return hidden[:, 1:, :]
+def extract_patch_tokens(model_bundle, pixel_values: np.ndarray, device: torch.device) -> np.ndarray:
+    if model_bundle.backend == "torch":
+        pixel_values_t = torch.from_numpy(pixel_values).to(device)
+        outputs = model_bundle.model(pixel_values=pixel_values_t)
+        hidden = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        if hidden.ndim != 3 or hidden.shape[1] < 2:
+            raise ValueError(f"Unexpected DINOv2 hidden state shape: {tuple(hidden.shape)}")
+        return hidden[:, 1:, :].detach().cpu().numpy()
+
+    if model_bundle.backend == "flax_pkl":
+        import jax.numpy as jnp
+
+        outputs = model_bundle.model(
+            pixel_values=jnp.asarray(pixel_values),
+            params=model_bundle.params,
+            train=False,
+        )
+        hidden = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        hidden = np.asarray(hidden)
+        if hidden.ndim != 3 or hidden.shape[1] < 2:
+            raise ValueError(f"Unexpected Flax DINOv2 hidden state shape: {tuple(hidden.shape)}")
+        return hidden[:, 1:, :]
+
+    raise ValueError(f"Unsupported model backend: {model_bundle.backend}")
 
 
 def grid_size_from_tokens(num_tokens: int) -> tuple[int, int]:
@@ -328,7 +479,7 @@ def compute_similarity_maps(
 
 
 def build_visualization_record(
-    model: torch.nn.Module,
+    model_bundle,
     image_path: Path,
     anchor_points_xy: list[tuple[float, float]],
     image_size: int,
@@ -338,7 +489,7 @@ def build_visualization_record(
     device: torch.device,
 ) -> dict[str, object]:
     display_image, pixel_values = load_and_prepare_image(image_path, image_size, mean, std, device)
-    tokens = extract_patch_tokens(model, pixel_values)[0].detach().cpu()
+    tokens = torch.from_numpy(extract_patch_tokens(model_bundle, pixel_values, device)[0]).float()
     grid_height, grid_width = grid_size_from_tokens(tokens.shape[0])
     anchors_rc = [normalized_anchor_to_grid(anchor, grid_width, grid_height) for anchor in anchor_points_xy]
 
@@ -561,9 +712,9 @@ def main() -> None:
     device = resolve_device(args.device)
     print(f"[info] Using device: {device}")
 
-    model, processor = load_local_dinov2_model(model_root, device)
-    image_size = infer_image_size(processor, model.config, args.image_size)
-    mean, std = infer_mean_std(processor)
+    model_bundle = load_local_dinov2_model(model_root, device)
+    image_size = infer_image_size(model_bundle.processor, model_bundle.config, args.image_size)
+    mean, std = infer_mean_std(model_bundle.processor)
     print(f"[info] Image size: {image_size} | mean: {mean} | std: {std}")
 
     records = []
@@ -571,7 +722,7 @@ def main() -> None:
         print(f"[info] Processing {image_path}")
         records.append(
             build_visualization_record(
-                model=model,
+                model_bundle=model_bundle,
                 image_path=image_path,
                 anchor_points_xy=anchors,
                 image_size=image_size,
