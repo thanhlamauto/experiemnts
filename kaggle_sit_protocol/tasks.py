@@ -791,6 +791,10 @@ def _task8_pca_mode(config: ProtocolConfig) -> str:
     return mode
 
 
+def _task8_output_path(outdir: Path, stem: str, pca_mode: str) -> Path:
+    return outdir / f"{stem}_{pca_mode}.pdf"
+
+
 def _task8_panel_tensor(
     bundle: FeatureBundle,
     family: str,
@@ -992,7 +996,9 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
 
     layer_labels = config.pca_panel_layers_1indexed
     time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
-    with PdfPages(outdir / "task8_mean_pca_rgb.pdf") as mean_pdf, PdfPages(outdir / "task8_tsvd_visuals.pdf") as tsvd_pdf:
+    with PdfPages(_task8_output_path(outdir, "task8_mean_pca_rgb", pca_mode)) as mean_pdf, PdfPages(
+        _task8_output_path(outdir, "task8_tsvd_visuals", pca_mode)
+    ) as tsvd_pdf:
         for _, row in progress(preview_rows.iterrows(), desc="Task 8: render PCA panels", total=len(preview_rows)):
             bundle = _extract_bundle(runtime, row, source="main", **preview_extract_kwargs)
             for family in families:
@@ -1051,13 +1057,13 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     ax.scatter(tsne[:, 0], tsne[:, 1], s=4)
     ax.set_title("Task 8 t-SNE token-level mean residual")
     fig.tight_layout()
-    fig.savefig(outdir / "task8_mean_tsne.pdf")
+    fig.savefig(_task8_output_path(outdir, "task8_mean_tsne", pca_mode))
     plt.close(fig)
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.scatter(umap_token[:, 0], umap_token[:, 1], s=4)
     ax.set_title("Task 8 UMAP token-level mean residual")
     fig.tight_layout()
-    fig.savefig(outdir / "task8_mean_umap_token.pdf")
+    fig.savefig(_task8_output_path(outdir, "task8_mean_umap_token", pca_mode))
     plt.close(fig)
 
     hidden = np.asarray(hidden_rows, dtype=np.float32)
@@ -1066,7 +1072,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     ax.scatter(hidden_umap[:, 0], hidden_umap[:, 1], s=10)
     ax.set_title("Task 8 UMAP hidden-state mean family")
     fig.tight_layout()
-    fig.savefig(outdir / "task8_mean_umap_hiddenstate.pdf")
+    fig.savefig(_task8_output_path(outdir, "task8_mean_umap_hiddenstate", pca_mode))
     plt.close(fig)
 
 
