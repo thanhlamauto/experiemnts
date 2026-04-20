@@ -35,6 +35,10 @@ from .metrics import (
 from .modeling import compute_patch_tokens, forward_features, linear_path_xt
 from .progress import progress, progress_bar
 from .probes import fit_linear_classifier
+from .spatial_plots import (
+    save_task4_family_figures,
+    save_task4_overview_curves,
+)
 from .runtime import RuntimeIndex
 from .stages import AnalysisRuntime
 
@@ -446,34 +450,35 @@ def _run_task4_like(
                                 }
                             )
 
-    layer_curves: dict[str, np.ndarray] = {}
-    time_curves: dict[str, np.ndarray] = {}
+    tables_by_family: dict[str, dict[str, pd.DataFrame]] = {}
     for (family, metric_name), rows in rows_by_family_metric.items():
         df = pd.DataFrame(rows)
         family_name = _family_output_name(family)
         df.to_csv(outdir / f"{file_prefix}_{family_name}_{metric_name}.csv", index=False)
-        summary = df.groupby(["component", "layer", "time_position"])["value"].mean().reset_index()
-        for component in ("raw", "common", "residual"):
-            comp = summary[summary["component"] == component]
-            layer_curve = comp.groupby("layer")["value"].mean().to_numpy()
-            time_curve = comp.groupby("time_position")["value"].mean().to_numpy()
-            layer_curves[f"{family_name}:{metric_name}:{component}"] = layer_curve
-            time_curves[f"{family_name}:{metric_name}:{component}"] = time_curve
+        tables_by_family.setdefault(family_name, {})[metric_name] = df
 
-    _save_lines_plot(
+    time_value_labels = [f"{value:.2f}" for value in config.time_values]
+    save_task4_overview_curves(
+        tables_by_family,
         outdir / f"{file_prefix}_layerwise_curves.pdf",
-        f"{title_prefix} Layer-wise Spatial Metrics",
-        np.arange(1, config.num_layers + 1),
-        layer_curves,
-        "Layer",
+        title=f"{title_prefix} Layer-wise Overview",
+        axis="layer",
     )
-    _save_lines_plot(
+    save_task4_overview_curves(
+        tables_by_family,
         outdir / f"{file_prefix}_timestep_curves.pdf",
-        f"{title_prefix} Timestep-wise Spatial Metrics",
-        np.arange(len(config.time_grid_indices)),
-        time_curves,
-        "Timestep Position",
+        title=f"{title_prefix} Timestep-wise Overview",
+        axis="time",
+        time_value_labels=time_value_labels,
     )
+    for family_name, metric_tables in tables_by_family.items():
+        save_task4_family_figures(
+            family_name,
+            metric_tables,
+            outdir / f"{file_prefix}_{family_name}_figures.pdf",
+            title_prefix=title_prefix,
+            time_value_labels=time_value_labels,
+        )
 
 
 def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:

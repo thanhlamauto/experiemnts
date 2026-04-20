@@ -33,6 +33,7 @@ class ProtocolConfig:
     num_classes: int = 1000
     checkpoint_path: str | None = None
     vae_model: str = "stabilityai/sd-vae-ft-ema"
+    hf_token: str | None = None
     sit_root: str = "SiT"
 
     path_type: str = "Linear"

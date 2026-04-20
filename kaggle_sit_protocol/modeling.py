@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -19,8 +20,37 @@ def _ensure_sit_on_path(config: ProtocolConfig) -> None:
         sys.path.insert(0, str(repo_root))
 
 
+def _resolve_hf_token(config: ProtocolConfig) -> str | None:
+    if config.hf_token:
+        return str(config.hf_token)
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+    try:
+        from kaggle_secrets import UserSecretsClient
+
+        return UserSecretsClient().get_secret("HF_TOKEN")
+    except Exception:
+        return None
+
+
+def _configure_hf_auth(config: ProtocolConfig) -> str | None:
+    token = _resolve_hf_token(config)
+    if not token:
+        return None
+    os.environ.setdefault("HF_TOKEN", token)
+    try:
+        from huggingface_hub import login
+
+        login(token=token, add_to_git_credential=False, skip_if_logged_in=True)
+    except Exception:
+        pass
+    return token
+
+
 def load_sit_model(config: ProtocolConfig, device: torch.device) -> torch.nn.Module:
     _ensure_sit_on_path(config)
+    _configure_hf_auth(config)
     from SiT.download import find_model
     from SiT.models import SiT_models
 
@@ -39,7 +69,14 @@ def load_sit_model(config: ProtocolConfig, device: torch.device) -> torch.nn.Mod
 def load_vae(config: ProtocolConfig, device: torch.device) -> torch.nn.Module:
     from diffusers.models import AutoencoderKL
 
-    vae = AutoencoderKL.from_pretrained(config.vae_model).to(device)
+    token = _configure_hf_auth(config)
+    if token:
+        try:
+            vae = AutoencoderKL.from_pretrained(config.vae_model, token=token).to(device)
+        except TypeError:
+            vae = AutoencoderKL.from_pretrained(config.vae_model, use_auth_token=token).to(device)
+    else:
+        vae = AutoencoderKL.from_pretrained(config.vae_model).to(device)
     vae.eval()
     return vae
 
