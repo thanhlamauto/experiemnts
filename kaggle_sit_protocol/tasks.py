@@ -32,7 +32,7 @@ from .metrics import (
     token_mean_cosine,
     wavelet_energies,
 )
-from .modeling import compute_patch_tokens, forward_features, linear_path_xt
+from .modeling import compute_patch_tokens, forward_features, linear_path_xt, token_grid_size
 from .progress import progress, progress_bar
 from .probes import fit_linear_classifier
 from .spatial_plots import (
@@ -48,6 +48,7 @@ class FeatureBundle:
     image_id: str
     class_index_100: int
     imagenet_idx: int
+    latent_clean: torch.Tensor | None
     patch_tokens_clean: torch.Tensor | None
     raw_norm: torch.Tensor
     mean_common_tokens: torch.Tensor
@@ -124,13 +125,16 @@ def _extract_bundle(
         from .decomposition import tsvd_basis_v64
 
         basis = tsvd_basis_v64(raw_norm, rank=64)
+    latent_clean = None
     patch_tokens_clean = None
     if include_patch_tokens:
+        latent_clean = x1_device.detach().cpu().float()
         patch_tokens_clean = compute_patch_tokens(runtime.model, x1_device.unsqueeze(0)).squeeze(0).detach().cpu().float()
     return FeatureBundle(
         image_id=str(row["image_id"]),
         class_index_100=int(row["class_index_100"]),
         imagenet_idx=int(row["imagenet_idx"]),
+        latent_clean=latent_clean,
         patch_tokens_clean=patch_tokens_clean,
         raw_norm=raw_norm,
         mean_common_tokens=mean_common_tokens,
@@ -795,6 +799,29 @@ def _task8_output_path(outdir: Path, stem: str, pca_mode: str) -> Path:
     return outdir / f"{stem}_{pca_mode}.pdf"
 
 
+def _task8_clean_panel_specs(bundle: FeatureBundle) -> list[tuple[str, torch.Tensor, int]]:
+    if bundle.latent_clean is None or bundle.patch_tokens_clean is None:
+        raise ValueError("Task 8 clean panels require latent_clean and patch_tokens_clean.")
+
+    latent = bundle.latent_clean
+    if latent.ndim != 3:
+        raise ValueError(f"Expected latent [C,H,W], got {tuple(latent.shape)}")
+    channels, height, width = latent.shape
+    if height != width:
+        raise ValueError(f"Expected square latent grid, got {height}x{width}")
+    latent_tokens = latent.permute(1, 2, 0).reshape(height * width, channels)
+
+    patch_tokens = bundle.patch_tokens_clean
+    grid_h, grid_w = token_grid_size(int(patch_tokens.shape[0]))
+    if grid_h != grid_w:
+        raise ValueError(f"Expected square patch token grid, got {grid_h}x{grid_w}")
+
+    return [
+        ("latent32", latent_tokens, height),
+        ("patchify0", patch_tokens, grid_h),
+    ]
+
+
 def _task8_panel_tensor(
     bundle: FeatureBundle,
     family: str,
@@ -865,14 +892,14 @@ def _render_pca_panel_page(
     family: str,
     component: str,
     spatial_norm: bool,
-    layer_labels: tuple[int, ...],
+    column_labels: list[str],
     time_labels: list[str],
     rgb_grid: list[list[np.ndarray]],
     image_size: int,
     pca_mode_label: str,
 ) -> None:
     rows = len(time_labels)
-    cols = len(layer_labels)
+    cols = len(column_labels)
     fig = plt.figure(figsize=(2.2 + 1.3 * cols, 0.8 + 1.35 * rows))
     grid = fig.add_gridspec(
         rows,
@@ -897,7 +924,7 @@ def _render_pca_panel_page(
             ax.imshow(rgb_grid[row_idx][col_idx])
             ax.axis("off")
             if row_idx == 0:
-                ax.set_title(f"layer{layer_labels[col_idx]}", fontsize=10)
+                ax.set_title(column_labels[col_idx], fontsize=10)
             if col_idx == 0:
                 ax.text(
                     -0.16,
@@ -940,6 +967,11 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             "pca_panel_layers": config.pca_panel_layers_zeroindexed,
             "pca_panel_times": config.pca_panel_timestep_positions,
         }
+    preview_bundle_kwargs = {
+        "source": "main",
+        "include_patch_tokens": True,
+        **preview_extract_kwargs,
+    }
     pca_models = (
         {
             (family, component, spatial_norm): IncrementalPCA(n_components=3)
@@ -950,13 +982,29 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
         if use_shared_pca
         else {}
     )
+    clean_pca_models = (
+        {
+            (stage_name, spatial_norm): IncrementalPCA(n_components=3)
+            for stage_name in ("latent32", "patchify0")
+            for spatial_norm in (False, True)
+        }
+        if use_shared_pca
+        else {}
+    )
     token_sample_blocks: list[np.ndarray] = []
     hidden_rows: list[list[float]] = []
 
     fit_desc = "Task 8: fit shared PCA" if use_shared_pca else "Task 8: collect PCA context"
     for _, row in progress(preview_rows.iterrows(), desc=fit_desc, total=len(preview_rows)):
-        bundle = _extract_bundle(runtime, row, source="main", **preview_extract_kwargs)
+        bundle = _extract_bundle(runtime, row, **preview_bundle_kwargs)
         if use_shared_pca:
+            for stage_name, clean_tokens, _ in _task8_clean_panel_specs(bundle):
+                clean_pca_models[(stage_name, False)].partial_fit(
+                    clean_tokens.cpu().numpy().astype(np.float32, copy=False)
+                )
+                clean_pca_models[(stage_name, True)].partial_fit(
+                    _apply_spatial_norm(clean_tokens, config).cpu().numpy().astype(np.float32, copy=False)
+                )
             for family in families:
                 for component in components:
                     if family != "mean" and component == "raw":
@@ -994,13 +1042,13 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                     ]
                 )
 
-    layer_labels = config.pca_panel_layers_1indexed
+    column_labels = ["vae32", "layer0"] + [f"layer{layer}" for layer in config.pca_panel_layers_1indexed]
     time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
     with PdfPages(_task8_output_path(outdir, "task8_mean_pca_rgb", pca_mode)) as mean_pdf, PdfPages(
         _task8_output_path(outdir, "task8_tsvd_visuals", pca_mode)
     ) as tsvd_pdf:
         for _, row in progress(preview_rows.iterrows(), desc="Task 8: render PCA panels", total=len(preview_rows)):
-            bundle = _extract_bundle(runtime, row, source="main", **preview_extract_kwargs)
+            bundle = _extract_bundle(runtime, row, **preview_bundle_kwargs)
             for family in families:
                 target_pdf = mean_pdf if family == "mean" else tsvd_pdf
                 for component in components:
@@ -1008,12 +1056,32 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                         continue
                     base_tensor = _task8_panel_tensor(bundle, family, component, config, pca_mode=pca_mode)
                     for spatial_norm in (False, True):
+                        clean_panel_images: list[np.ndarray] = []
+                        for stage_name, clean_tokens, grid_size in _task8_clean_panel_specs(bundle):
+                            stage_tokens = _apply_spatial_norm(clean_tokens, config) if spatial_norm else clean_tokens
+                            if use_shared_pca:
+                                clean_panel_images.append(
+                                    _tokens_to_pca_rgb(
+                                        stage_tokens,
+                                        grid_size,
+                                        pca_model=clean_pca_models[(stage_name, spatial_norm)],
+                                    )
+                                )
+                            else:
+                                clean_panel_images.append(
+                                    _tokens_to_pca_rgb(
+                                        stage_tokens,
+                                        grid_size,
+                                        fit_local_pca=True,
+                                        channelwise_scale=True,
+                                    )
+                                )
                         panel_tensor = base_tensor
                         if spatial_norm:
                             panel_tensor = _apply_spatial_norm(panel_tensor, config)
                         rgb_grid: list[list[np.ndarray]] = []
                         for time_offset in range(len(config.pca_panel_timestep_positions)):
-                            row_images = []
+                            row_images = list(clean_panel_images)
                             for layer_offset in range(len(config.pca_panel_layers_zeroindexed)):
                                 token_map = panel_tensor[layer_offset, time_offset]
                                 if use_shared_pca:
@@ -1041,7 +1109,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                             family=family,
                             component=component,
                             spatial_norm=spatial_norm,
-                            layer_labels=layer_labels,
+                            column_labels=column_labels,
                             time_labels=time_labels,
                             rgb_grid=rgb_grid,
                             image_size=config.image_size,
