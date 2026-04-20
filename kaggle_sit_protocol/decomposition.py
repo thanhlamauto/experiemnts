@@ -9,6 +9,13 @@ def l2_normalize_tokens(tensor: torch.Tensor, eps: float = 1e-6) -> torch.Tensor
     return tensor / (denom + eps)
 
 
+def spatial_normalize_tokens(tensor: torch.Tensor, gamma: float = 1.0, eps: float = 1e-6) -> torch.Tensor:
+    mean = tensor.mean(dim=-2, keepdim=True)
+    variance = tensor.var(dim=-2, keepdim=True, unbiased=False)
+    centered = tensor - gamma * mean
+    return centered / torch.sqrt(variance + eps)
+
+
 def mean_common(raw_normalized: torch.Tensor) -> torch.Tensor:
     return raw_normalized.mean(dim=0)
 
@@ -47,4 +54,3 @@ def cosine_similarity_tokenwise(x: torch.Tensor, y: torch.Tensor, eps: float = 1
     x_norm = F.normalize(x.float(), dim=-1, eps=eps)
     y_norm = F.normalize(y.float(), dim=-1, eps=eps)
     return (x_norm * y_norm).sum(dim=-1).mean()
-

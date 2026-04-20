@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from matplotlib.backends.backend_pdf import PdfPages
+from PIL import Image
 
 from .config import ProtocolConfig
 from .decomposition import (
@@ -17,6 +18,7 @@ from .decomposition import (
     mean_pool_tokens,
     mean_residual,
     project_to_basis,
+    spatial_normalize_tokens,
 )
 from .metrics import (
     WaveletEnergies,
@@ -154,6 +156,26 @@ def _family_names(config: ProtocolConfig) -> list[str]:
 
 def _family_output_name(family: str) -> str:
     return "mean" if family == "mean" else family.replace("tsvd_k", "tsvd_K")
+
+
+def _family_display_name(family: str) -> str:
+    return "mean-common" if family == "mean" else family.replace("tsvd_k", "tsvd-K")
+
+
+def _component_display_name(component: str) -> str:
+    return {
+        "raw": "raw",
+        "common": "common",
+        "residual": "residual",
+    }[component]
+
+
+def _apply_spatial_norm(tensor: torch.Tensor, config: ProtocolConfig) -> torch.Tensor:
+    return spatial_normalize_tokens(
+        tensor,
+        gamma=config.spatial_norm_gamma,
+        eps=config.spatial_norm_eps,
+    )
 
 
 def _save_object_npy(path: Path, payload: dict[str, object]) -> None:
@@ -384,7 +406,15 @@ def run_task2(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             _heatmap_page(pdf, tokenmean_payload["layer_residual"][0], f"Task 2 {family_name} residual layer heatmap @ t0", "Layer", "Layer")
 
 
-def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:
+def _run_task4_like(
+    config: ProtocolConfig,
+    runtime: AnalysisRuntime,
+    outdir: Path,
+    *,
+    file_prefix: str,
+    title_prefix: str,
+    transform=None,
+) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     rows_by_family_metric: dict[tuple[str, str], list[dict[str, object]]] = {}
     main_rows = _main_rows(runtime)
@@ -394,6 +424,8 @@ def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
         for family in _family_names(config):
             for component in ("raw", "common", "residual"):
                 tensor = _variant_tensor(bundle, family, component)
+                if transform is not None:
+                    tensor = transform(tensor)
                 for layer in range(config.num_layers):
                     for time_pos in range(len(config.time_grid_indices)):
                         z = tensor[layer, time_pos]
@@ -418,7 +450,7 @@ def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     for (family, metric_name), rows in rows_by_family_metric.items():
         df = pd.DataFrame(rows)
         family_name = _family_output_name(family)
-        df.to_csv(outdir / f"task4_{family_name}_{metric_name}.csv", index=False)
+        df.to_csv(outdir / f"{file_prefix}_{family_name}_{metric_name}.csv", index=False)
         summary = df.groupby(["component", "layer", "time_position"])["value"].mean().reset_index()
         for component in ("raw", "common", "residual"):
             comp = summary[summary["component"] == component]
@@ -428,18 +460,39 @@ def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             time_curves[f"{family_name}:{metric_name}:{component}"] = time_curve
 
     _save_lines_plot(
-        outdir / "task4_layerwise_curves.pdf",
-        "Task 4 Layer-wise Spatial Metrics",
+        outdir / f"{file_prefix}_layerwise_curves.pdf",
+        f"{title_prefix} Layer-wise Spatial Metrics",
         np.arange(1, config.num_layers + 1),
         layer_curves,
         "Layer",
     )
     _save_lines_plot(
-        outdir / "task4_timestep_curves.pdf",
-        "Task 4 Timestep-wise Spatial Metrics",
+        outdir / f"{file_prefix}_timestep_curves.pdf",
+        f"{title_prefix} Timestep-wise Spatial Metrics",
         np.arange(len(config.time_grid_indices)),
         time_curves,
         "Timestep Position",
+    )
+
+
+def run_task4(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:
+    _run_task4_like(
+        config,
+        runtime,
+        outdir,
+        file_prefix="task4",
+        title_prefix="Task 4",
+    )
+
+
+def run_task4b_spatialnorm(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:
+    _run_task4_like(
+        config,
+        runtime,
+        outdir,
+        file_prefix="task4b_spatialnorm",
+        title_prefix="Task 4B Spatial-Norm",
+        transform=lambda tensor: _apply_spatial_norm(tensor, config),
     )
 
 
@@ -705,44 +758,198 @@ def run_task7(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                             _heatmap_page(tsvd_pdf, residual_map.reshape(config.patch_grid_size, config.patch_grid_size).numpy(), f"TSVD-{rank} residual {image_id} L{layer} T{time_pos} A{anchor}", "X", "Y")
 
 
+def _select_tensor_block(
+    tensor: torch.Tensor,
+    layer_positions: tuple[int, ...],
+    time_positions: tuple[int, ...],
+) -> torch.Tensor:
+    return tensor[list(layer_positions)][:, list(time_positions)]
+
+
+def _tokens_to_pca_rgb(tokens: torch.Tensor, pca_model, grid_size: int) -> np.ndarray:
+    flat = tokens.reshape(-1, tokens.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+    comps = pca_model.transform(flat).reshape(grid_size, grid_size, 3)
+    comps = comps - comps.min()
+    comps = comps / np.clip(comps.max(), 1e-6, None)
+    return comps
+
+
+def _load_preview_image(path: str, image_size: int) -> np.ndarray:
+    with Image.open(path) as image:
+        return np.asarray(image.convert("RGB").resize((image_size, image_size)))
+
+
+def _render_pca_panel_page(
+    pdf: PdfPages,
+    *,
+    image_path: str,
+    image_id: str,
+    family: str,
+    component: str,
+    spatial_norm: bool,
+    layer_labels: tuple[int, ...],
+    time_labels: list[str],
+    rgb_grid: list[list[np.ndarray]],
+    image_size: int,
+) -> None:
+    rows = len(time_labels)
+    cols = len(layer_labels)
+    fig = plt.figure(figsize=(2.2 + 1.3 * cols, 0.8 + 1.35 * rows))
+    grid = fig.add_gridspec(
+        rows,
+        cols + 1,
+        width_ratios=[1.25] + [1.0] * cols,
+        left=0.04,
+        right=0.99,
+        top=0.90,
+        bottom=0.06,
+        wspace=0.08,
+        hspace=0.08,
+    )
+
+    source_ax = fig.add_subplot(grid[:, 0])
+    source_ax.imshow(_load_preview_image(image_path, image_size=image_size))
+    source_ax.set_title("input", fontsize=10)
+    source_ax.axis("off")
+
+    for row_idx in range(rows):
+        for col_idx in range(cols):
+            ax = fig.add_subplot(grid[row_idx, col_idx + 1])
+            ax.imshow(rgb_grid[row_idx][col_idx])
+            ax.axis("off")
+            if row_idx == 0:
+                ax.set_title(f"layer{layer_labels[col_idx]}", fontsize=10)
+            if col_idx == 0:
+                ax.text(
+                    -0.16,
+                    0.5,
+                    time_labels[row_idx],
+                    transform=ax.transAxes,
+                    rotation=90,
+                    va="center",
+                    ha="right",
+                    fontsize=10,
+                    fontweight="bold",
+                )
+
+    norm_label = "after spatial norm" if spatial_norm else "before spatial norm"
+    fig.suptitle(
+        f"Task 8 PCA-RGB | {_family_display_name(family)} | {_component_display_name(component)} | {norm_label} | {image_id}",
+        fontsize=12,
+        fontweight="bold",
+    )
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
-    from sklearn.decomposition import PCA
+    from sklearn.decomposition import IncrementalPCA, PCA
     from sklearn.manifold import TSNE
     import umap
 
     preview_rows = _main_rows(runtime)
     preview_rows = preview_rows[preview_rows["preview"]].reset_index(drop=True)
-    bundles = [_extract_bundle(runtime, row, source="main", include_patch_tokens=True) for _, row in preview_rows.iterrows()]
+    families = _family_names(config)
+    components = ("raw", "common", "residual")
+    pca_models = {
+        (family, component, spatial_norm): IncrementalPCA(n_components=3)
+        for family in families
+        for component in components
+        for spatial_norm in (False, True)
+    }
+    token_sample_blocks: list[np.ndarray] = []
+    hidden_rows: list[list[float]] = []
 
-    def stacked_tokens(component: str, family: str) -> np.ndarray:
-        pieces = []
-        for bundle in bundles:
-            tensor = _variant_tensor(bundle, family, component)
-            pieces.append(tensor.reshape(-1, tensor.shape[-1]).numpy())
-        return np.concatenate(pieces, axis=0)
+    for _, row in preview_rows.iterrows():
+        bundle = _extract_bundle(runtime, row, source="main")
+        for family in families:
+            for component in components:
+                if family != "mean" and component == "raw":
+                    continue
+                base_tensor = _variant_tensor(bundle, family, component)
+                panel_tensor = _select_tensor_block(
+                    base_tensor,
+                    config.pca_panel_layers_zeroindexed,
+                    config.pca_panel_timestep_positions,
+                )
+                pca_models[(family, component, False)].partial_fit(
+                    panel_tensor.reshape(-1, panel_tensor.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+                )
+                spatial_panel = _apply_spatial_norm(panel_tensor, config)
+                pca_models[(family, component, True)].partial_fit(
+                    spatial_panel.reshape(-1, spatial_panel.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+                )
 
-    def pca_rgb_grid(tensor: torch.Tensor) -> np.ndarray:
-        flat = tensor.reshape(-1, tensor.shape[-1]).numpy()
-        pca = PCA(n_components=3, random_state=config.seed)
-        comps = pca.fit_transform(flat)
-        comps = comps.reshape(tensor.shape[0], config.patch_grid_size, config.patch_grid_size, 3)
-        comps = comps - comps.min()
-        comps = comps / np.clip(comps.max(), 1e-6, None)
-        return comps
+        mean_residual_subset = _select_tensor_block(
+            _variant_tensor(bundle, "mean", "residual"),
+            config.preview_layers_zeroindexed,
+            config.preview_timestep_positions,
+        )
+        token_sample_blocks.append(
+            mean_residual_subset.reshape(-1, mean_residual_subset.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+        )
 
-    with PdfPages(outdir / "task8_mean_pca_rgb.pdf") as pdf:
-        mean_stack = torch.stack([bundle.mean_residual_tokens for bundle in bundles], dim=0)
-        rgb = pca_rgb_grid(mean_stack[:, config.preview_layers_zeroindexed[0], config.preview_timestep_positions[0]])
-        for idx, image_id in enumerate(preview_rows["image_id"]):
-            fig, ax = plt.subplots(figsize=(4, 4))
-            ax.imshow(rgb[idx])
-            ax.set_title(f"Mean residual PCA-RGB {image_id}")
-            ax.axis("off")
-            pdf.savefig(fig)
-            plt.close(fig)
+        mean_common = _variant_tensor(bundle, "mean", "common")
+        for layer in range(config.num_layers):
+            for time_pos in range(len(config.time_grid_indices)):
+                raw = bundle.raw_norm[layer, time_pos]
+                hidden_rows.append(
+                    [
+                        lds_metric(raw, config.patch_grid_size),
+                        cds_metric(raw, config.patch_grid_size),
+                        rmsc_metric(raw, eps=config.stats_eps),
+                        float(token_mean_cosine(raw, mean_common[layer, time_pos]).item()),
+                        float(raw.mean().item()),
+                        float(raw.var(unbiased=False).item()),
+                    ]
+                )
 
-    token_samples = stacked_tokens("residual", "mean")
+    layer_labels = config.pca_panel_layers_1indexed
+    time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
+    with PdfPages(outdir / "task8_mean_pca_rgb.pdf") as mean_pdf, PdfPages(outdir / "task8_tsvd_visuals.pdf") as tsvd_pdf:
+        for _, row in preview_rows.iterrows():
+            bundle = _extract_bundle(runtime, row, source="main")
+            for family in families:
+                target_pdf = mean_pdf if family == "mean" else tsvd_pdf
+                for component in components:
+                    if family != "mean" and component == "raw":
+                        continue
+                    base_tensor = _variant_tensor(bundle, family, component)
+                    for spatial_norm in (False, True):
+                        panel_tensor = _select_tensor_block(
+                            base_tensor,
+                            config.pca_panel_layers_zeroindexed,
+                            config.pca_panel_timestep_positions,
+                        )
+                        if spatial_norm:
+                            panel_tensor = _apply_spatial_norm(panel_tensor, config)
+                        rgb_grid: list[list[np.ndarray]] = []
+                        for time_offset in range(len(config.pca_panel_timestep_positions)):
+                            row_images = []
+                            for layer_offset in range(len(config.pca_panel_layers_zeroindexed)):
+                                row_images.append(
+                                    _tokens_to_pca_rgb(
+                                        panel_tensor[layer_offset, time_offset],
+                                        pca_models[(family, component, spatial_norm)],
+                                        config.patch_grid_size,
+                                    )
+                                )
+                            rgb_grid.append(row_images)
+                        _render_pca_panel_page(
+                            target_pdf,
+                            image_path=str(row["absolute_path"]),
+                            image_id=str(row["image_id"]),
+                            family=family,
+                            component=component,
+                            spatial_norm=spatial_norm,
+                            layer_labels=layer_labels,
+                            time_labels=time_labels,
+                            rgb_grid=rgb_grid,
+                            image_size=config.image_size,
+                        )
+
+    token_samples = np.concatenate(token_sample_blocks, axis=0)
     pca50 = PCA(n_components=min(50, token_samples.shape[1]), random_state=config.seed).fit_transform(token_samples)
     tsne = TSNE(n_components=2, init="pca", random_state=config.seed, perplexity=30).fit_transform(pca50)
     reducer = umap.UMAP(n_components=2, random_state=config.seed)
@@ -760,22 +967,6 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     fig.savefig(outdir / "task8_mean_umap_token.pdf")
     plt.close(fig)
 
-    hidden_rows = []
-    for bundle in bundles:
-        common = bundle.mean_common_tokens.unsqueeze(0).expand(config.num_layers, -1, -1, -1)
-        for layer in range(config.num_layers):
-            for time_pos in range(len(config.time_grid_indices)):
-                raw = bundle.raw_norm[layer, time_pos]
-                hidden_rows.append(
-                    [
-                        lds_metric(raw, config.patch_grid_size),
-                        cds_metric(raw, config.patch_grid_size),
-                        rmsc_metric(raw, eps=config.stats_eps),
-                        float(token_mean_cosine(raw, common[layer, time_pos]).item()),
-                        float(raw.mean().item()),
-                        float(raw.var(unbiased=False).item()),
-                    ]
-                )
     hidden = np.asarray(hidden_rows, dtype=np.float32)
     hidden_umap = umap.UMAP(n_components=2, random_state=config.seed).fit_transform(hidden)
     fig, ax = plt.subplots(figsize=(6, 5))
@@ -784,18 +975,6 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     fig.tight_layout()
     fig.savefig(outdir / "task8_mean_umap_hiddenstate.pdf")
     plt.close(fig)
-
-    with PdfPages(outdir / "task8_tsvd_visuals.pdf") as pdf:
-        for rank in config.tsvd_ranks:
-            samples = stacked_tokens("residual", f"tsvd_k{rank}")
-            reducer = umap.UMAP(n_components=2, random_state=config.seed)
-            projection = reducer.fit_transform(samples[: min(len(samples), 30000)])
-            fig, ax = plt.subplots(figsize=(6, 5))
-            ax.scatter(projection[:, 0], projection[:, 1], s=3)
-            ax.set_title(f"Task 8 TSVD-{rank} residual token UMAP")
-            fig.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
 
 
 def run_task9(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:
@@ -989,6 +1168,7 @@ def run_all_tasks(config: ProtocolConfig, runtime: AnalysisRuntime, stage_dir: P
     run_task1(config, runtime, stage_dir)
     run_task2(config, runtime, stage_dir)
     run_task4(config, runtime, stage_dir)
+    run_task4b_spatialnorm(config, runtime, stage_dir)
     run_task5(config, runtime, stage_dir)
     run_task3(config, runtime, stage_dir)
     run_task6(config, runtime, stage_dir)
@@ -998,10 +1178,11 @@ def run_all_tasks(config: ProtocolConfig, runtime: AnalysisRuntime, stage_dir: P
     run_task10(config, runtime, stage_dir)
     done = {
         "stage": "analysis",
-        "tasks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        "tasks": [1, 2, 3, 4, "4b_spatialnorm", 5, 6, 7, 8, 9, 10],
     }
     sanity = {
         "task5_probe_maps_exists": bool((stage_dir / "task5_probe_maps.npz").exists()),
+        "task4b_spatialnorm_exists": bool((stage_dir / "task4b_spatialnorm_mean_lds.csv").exists()),
         "task9_delta_exists": bool((stage_dir / "task9_delta.csv").exists()),
         "task10_wavelet_exists": bool((stage_dir / "task10_wavelet_ratio.csv").exists()),
     }

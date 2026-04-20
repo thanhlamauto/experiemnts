@@ -9,6 +9,8 @@ DEFAULT_TIME_GRID_INDICES = (0, 27, 55, 83, 110, 138, 166, 193, 221, 249)
 DEFAULT_TSVD_RANKS = (16, 32, 64)
 DEFAULT_PREVIEW_LAYERS = (1, 14, 28)
 DEFAULT_PREVIEW_TIMESTEP_POSITIONS = (0, 4, 9)
+DEFAULT_PCA_PANEL_LAYERS = (1, 3, 8, 13, 18, 23, 28)
+DEFAULT_PCA_PANEL_TIMESTEP_POSITIONS = (6, 5, 3, 1)
 
 
 @dataclass
@@ -54,9 +56,15 @@ class ProtocolConfig:
     probe_weight_decay: float = 1e-4
 
     stats_eps: float = 1e-6
+    spatial_norm_gamma: float = 1.0
+    spatial_norm_eps: float = 1e-6
     preview_layers_1indexed: tuple[int, ...] = field(default_factory=lambda: DEFAULT_PREVIEW_LAYERS)
     preview_timestep_positions: tuple[int, ...] = field(
         default_factory=lambda: DEFAULT_PREVIEW_TIMESTEP_POSITIONS
+    )
+    pca_panel_layers_1indexed: tuple[int, ...] = field(default_factory=lambda: DEFAULT_PCA_PANEL_LAYERS)
+    pca_panel_timestep_positions: tuple[int, ...] = field(
+        default_factory=lambda: DEFAULT_PCA_PANEL_TIMESTEP_POSITIONS
     )
     tsvd_ranks: tuple[int, ...] = field(default_factory=lambda: DEFAULT_TSVD_RANKS)
 
@@ -107,6 +115,10 @@ class ProtocolConfig:
     @property
     def preview_layers_zeroindexed(self) -> tuple[int, ...]:
         return tuple(layer - 1 for layer in self.preview_layers_1indexed)
+
+    @property
+    def pca_panel_layers_zeroindexed(self) -> tuple[int, ...]:
+        return tuple(layer - 1 for layer in self.pca_panel_layers_1indexed)
 
     @property
     def variant_names(self) -> tuple[str, ...]:

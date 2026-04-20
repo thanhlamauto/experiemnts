@@ -40,7 +40,8 @@ Các notebook này thực hiện:
 - build manifest `500 main / 100 control / 16 preview`
 - encode latent + fixed noise cache
 - dựng `mean-common` và `tsvd-common (K=16,32,64)` mà không dump full activations
-- chạy Task 1-10 từ cache gọn để giữ output an toàn dưới giới hạn Kaggle
+- chạy Task 1-10 kèm `Task 4B spatial norm` từ cache gọn để giữ output an toàn dưới giới hạn Kaggle
+- xuất PCA-RGB panel cho `raw/common/residual` cả trước và sau spatial norm trong `Task 8`
 
 Package entrypoints:
 
