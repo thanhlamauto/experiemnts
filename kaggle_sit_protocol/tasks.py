@@ -53,6 +53,7 @@ class FeatureBundle:
     mean_common_tokens: torch.Tensor
     mean_residual_tokens: torch.Tensor
     basis_v64: torch.Tensor
+    pca_panel_raw: torch.Tensor | None
 
 
 def _main_rows(runtime: AnalysisRuntime) -> pd.DataFrame:
@@ -74,9 +75,13 @@ def _extract_bundle(
     source: str = "main",
     include_patch_tokens: bool = False,
     recompute_basis: bool = False,
+    pca_panel_layers: tuple[int, ...] | None = None,
+    pca_panel_times: tuple[int, ...] | None = None,
 ) -> FeatureBundle:
     if not isinstance(runtime.index, RuntimeIndex):
         raise TypeError("Analysis runtime index is missing.")
+    if (pca_panel_layers is None) != (pca_panel_times is None):
+        raise ValueError("pca_panel_layers and pca_panel_times must be provided together.")
 
     if source == "main":
         position = runtime.index.main_positions[str(row["image_id"])]
@@ -109,6 +114,9 @@ def _extract_bundle(
     xt = linear_path_xt(x1_device, x0_device, timesteps)
     labels = torch.full((len(runtime.config.time_values),), int(row["imagenet_idx"]), device=runtime.device, dtype=torch.long)
     _, blocks = forward_features(runtime.model, xt, timesteps, labels)
+    pca_panel_raw = None
+    if pca_panel_layers is not None and pca_panel_times is not None:
+        pca_panel_raw = blocks[list(pca_panel_layers)][:, list(pca_panel_times)].detach().cpu().float()
     raw_norm = l2_normalize_tokens(blocks, eps=runtime.config.stats_eps).detach().cpu().float()
     mean_common_tokens = mean_common(raw_norm)
     mean_residual_tokens = mean_residual(raw_norm, mean_common_tokens)
@@ -128,6 +136,7 @@ def _extract_bundle(
         mean_common_tokens=mean_common_tokens,
         mean_residual_tokens=mean_residual_tokens,
         basis_v64=basis.float(),
+        pca_panel_raw=pca_panel_raw,
     )
 
 
@@ -775,11 +784,67 @@ def _select_tensor_block(
     return tensor[list(layer_positions)][:, list(time_positions)]
 
 
-def _tokens_to_pca_rgb(tokens: torch.Tensor, pca_model, grid_size: int) -> np.ndarray:
+def _task8_pca_mode(config: ProtocolConfig) -> str:
+    mode = str(config.pca_mode).strip().lower()
+    if mode not in {"shared_global", "sra_local"}:
+        raise ValueError(f"Unsupported Task 8 PCA mode {config.pca_mode!r}")
+    return mode
+
+
+def _task8_panel_tensor(
+    bundle: FeatureBundle,
+    family: str,
+    component: str,
+    config: ProtocolConfig,
+    *,
+    pca_mode: str,
+) -> torch.Tensor:
+    if pca_mode == "sra_local" and family == "mean" and component == "raw" and bundle.pca_panel_raw is not None:
+        return bundle.pca_panel_raw
+    return _select_tensor_block(
+        _variant_tensor(bundle, family, component),
+        config.pca_panel_layers_zeroindexed,
+        config.pca_panel_timestep_positions,
+    )
+
+
+def _scale_pca_components(components: np.ndarray, *, channelwise: bool) -> np.ndarray:
+    scaled = components.astype(np.float32, copy=True)
+    if channelwise:
+        for idx in range(scaled.shape[1]):
+            channel = scaled[:, idx]
+            min_value = float(channel.min())
+            max_value = float(channel.max())
+            if max_value - min_value <= 1e-6:
+                channel.fill(0.0)
+            else:
+                channel -= min_value
+                channel /= max_value - min_value
+        return scaled
+
+    scaled -= scaled.min()
+    scaled /= np.clip(scaled.max(), 1e-6, None)
+    return scaled
+
+
+def _tokens_to_pca_rgb(
+    tokens: torch.Tensor,
+    grid_size: int,
+    *,
+    pca_model=None,
+    fit_local_pca: bool = False,
+    channelwise_scale: bool = False,
+) -> np.ndarray:
     flat = tokens.reshape(-1, tokens.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
-    comps = pca_model.transform(flat).reshape(grid_size, grid_size, 3)
-    comps = comps - comps.min()
-    comps = comps / np.clip(comps.max(), 1e-6, None)
+    if fit_local_pca:
+        from sklearn.decomposition import PCA
+
+        comps = PCA(n_components=3).fit_transform(flat)
+    else:
+        if pca_model is None:
+            raise ValueError("pca_model is required unless fit_local_pca=True")
+        comps = pca_model.transform(flat)
+    comps = _scale_pca_components(comps, channelwise=channelwise_scale).reshape(grid_size, grid_size, 3)
     return comps
 
 
@@ -800,6 +865,7 @@ def _render_pca_panel_page(
     time_labels: list[str],
     rgb_grid: list[list[np.ndarray]],
     image_size: int,
+    pca_mode_label: str,
 ) -> None:
     rows = len(time_labels)
     cols = len(layer_labels)
@@ -843,7 +909,7 @@ def _render_pca_panel_page(
 
     norm_label = "after spatial norm" if spatial_norm else "before spatial norm"
     fig.suptitle(
-        f"Task 8 PCA-RGB | {_family_display_name(family)} | {_component_display_name(component)} | {norm_label} | {image_id}",
+        f"Task 8 PCA-RGB ({pca_mode_label}) | {_family_display_name(family)} | {_component_display_name(component)} | {norm_label} | {image_id}",
         fontsize=12,
         fontweight="bold",
     )
@@ -861,34 +927,44 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     preview_rows = preview_rows[preview_rows["preview"]].reset_index(drop=True)
     families = _family_names(config)
     components = ("raw", "common", "residual")
-    pca_models = {
-        (family, component, spatial_norm): IncrementalPCA(n_components=3)
-        for family in families
-        for component in components
-        for spatial_norm in (False, True)
-    }
+    pca_mode = _task8_pca_mode(config)
+    use_shared_pca = pca_mode == "shared_global"
+    pca_mode_label = "shared_global" if use_shared_pca else "sra_local"
+    preview_extract_kwargs: dict[str, tuple[int, ...]] = {}
+    if pca_mode == "sra_local":
+        preview_extract_kwargs = {
+            "pca_panel_layers": config.pca_panel_layers_zeroindexed,
+            "pca_panel_times": config.pca_panel_timestep_positions,
+        }
+    pca_models = (
+        {
+            (family, component, spatial_norm): IncrementalPCA(n_components=3)
+            for family in families
+            for component in components
+            for spatial_norm in (False, True)
+        }
+        if use_shared_pca
+        else {}
+    )
     token_sample_blocks: list[np.ndarray] = []
     hidden_rows: list[list[float]] = []
 
-    for _, row in progress(preview_rows.iterrows(), desc="Task 8: fit PCA", total=len(preview_rows)):
-        bundle = _extract_bundle(runtime, row, source="main")
-        for family in families:
-            for component in components:
-                if family != "mean" and component == "raw":
-                    continue
-                base_tensor = _variant_tensor(bundle, family, component)
-                panel_tensor = _select_tensor_block(
-                    base_tensor,
-                    config.pca_panel_layers_zeroindexed,
-                    config.pca_panel_timestep_positions,
-                )
-                pca_models[(family, component, False)].partial_fit(
-                    panel_tensor.reshape(-1, panel_tensor.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
-                )
-                spatial_panel = _apply_spatial_norm(panel_tensor, config)
-                pca_models[(family, component, True)].partial_fit(
-                    spatial_panel.reshape(-1, spatial_panel.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
-                )
+    fit_desc = "Task 8: fit shared PCA" if use_shared_pca else "Task 8: collect PCA context"
+    for _, row in progress(preview_rows.iterrows(), desc=fit_desc, total=len(preview_rows)):
+        bundle = _extract_bundle(runtime, row, source="main", **preview_extract_kwargs)
+        if use_shared_pca:
+            for family in families:
+                for component in components:
+                    if family != "mean" and component == "raw":
+                        continue
+                    panel_tensor = _task8_panel_tensor(bundle, family, component, config, pca_mode=pca_mode)
+                    pca_models[(family, component, False)].partial_fit(
+                        panel_tensor.reshape(-1, panel_tensor.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+                    )
+                    spatial_panel = _apply_spatial_norm(panel_tensor, config)
+                    pca_models[(family, component, True)].partial_fit(
+                        spatial_panel.reshape(-1, spatial_panel.shape[-1]).cpu().numpy().astype(np.float32, copy=False)
+                    )
 
         mean_residual_subset = _select_tensor_block(
             _variant_tensor(bundle, "mean", "residual"),
@@ -918,32 +994,39 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
     with PdfPages(outdir / "task8_mean_pca_rgb.pdf") as mean_pdf, PdfPages(outdir / "task8_tsvd_visuals.pdf") as tsvd_pdf:
         for _, row in progress(preview_rows.iterrows(), desc="Task 8: render PCA panels", total=len(preview_rows)):
-            bundle = _extract_bundle(runtime, row, source="main")
+            bundle = _extract_bundle(runtime, row, source="main", **preview_extract_kwargs)
             for family in families:
                 target_pdf = mean_pdf if family == "mean" else tsvd_pdf
                 for component in components:
                     if family != "mean" and component == "raw":
                         continue
-                    base_tensor = _variant_tensor(bundle, family, component)
+                    base_tensor = _task8_panel_tensor(bundle, family, component, config, pca_mode=pca_mode)
                     for spatial_norm in (False, True):
-                        panel_tensor = _select_tensor_block(
-                            base_tensor,
-                            config.pca_panel_layers_zeroindexed,
-                            config.pca_panel_timestep_positions,
-                        )
+                        panel_tensor = base_tensor
                         if spatial_norm:
                             panel_tensor = _apply_spatial_norm(panel_tensor, config)
                         rgb_grid: list[list[np.ndarray]] = []
                         for time_offset in range(len(config.pca_panel_timestep_positions)):
                             row_images = []
                             for layer_offset in range(len(config.pca_panel_layers_zeroindexed)):
-                                row_images.append(
-                                    _tokens_to_pca_rgb(
-                                        panel_tensor[layer_offset, time_offset],
-                                        pca_models[(family, component, spatial_norm)],
-                                        config.patch_grid_size,
+                                token_map = panel_tensor[layer_offset, time_offset]
+                                if use_shared_pca:
+                                    row_images.append(
+                                        _tokens_to_pca_rgb(
+                                            token_map,
+                                            config.patch_grid_size,
+                                            pca_model=pca_models[(family, component, spatial_norm)],
+                                        )
                                     )
-                                )
+                                else:
+                                    row_images.append(
+                                        _tokens_to_pca_rgb(
+                                            token_map,
+                                            config.patch_grid_size,
+                                            fit_local_pca=True,
+                                            channelwise_scale=True,
+                                        )
+                                    )
                             rgb_grid.append(row_images)
                         _render_pca_panel_page(
                             target_pdf,
@@ -956,6 +1039,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                             time_labels=time_labels,
                             rgb_grid=rgb_grid,
                             image_size=config.image_size,
+                            pca_mode_label=pca_mode_label,
                         )
 
     token_samples = np.concatenate(token_sample_blocks, axis=0)

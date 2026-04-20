@@ -11,6 +11,7 @@ DEFAULT_PREVIEW_LAYERS = (1, 14, 28)
 DEFAULT_PREVIEW_TIMESTEP_POSITIONS = (0, 4, 9)
 DEFAULT_PCA_PANEL_LAYERS = (1, 3, 8, 13, 18, 23, 28)
 DEFAULT_PCA_PANEL_TIMESTEP_POSITIONS = (6, 5, 3, 1)
+DEFAULT_PCA_MODE = "shared_global"
 
 
 @dataclass
@@ -69,6 +70,7 @@ class ProtocolConfig:
     pca_panel_timestep_positions: tuple[int, ...] = field(
         default_factory=lambda: DEFAULT_PCA_PANEL_TIMESTEP_POSITIONS
     )
+    pca_mode: str = DEFAULT_PCA_MODE
     tsvd_ranks: tuple[int, ...] = field(default_factory=lambda: DEFAULT_TSVD_RANKS)
 
     smoke_images: int = 8
