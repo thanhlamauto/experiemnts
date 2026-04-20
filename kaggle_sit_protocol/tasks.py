@@ -33,6 +33,7 @@ from .metrics import (
     wavelet_energies,
 )
 from .modeling import compute_patch_tokens, forward_features, linear_path_xt
+from .progress import progress, progress_bar
 from .probes import fit_linear_classifier
 from .runtime import RuntimeIndex
 from .stages import AnalysisRuntime
@@ -240,7 +241,7 @@ def run_task1(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     by_family_rows: dict[str, list[dict[str, object]]] = {family: [] for family in _family_names(config)}
     main_rows = _main_rows(runtime)
 
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc="Task 1: main images", total=len(main_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         for family in _family_names(config):
             for component in ("raw", "common", "residual"):
@@ -361,7 +362,7 @@ def run_task2(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             "residual_time_cka": np.zeros((config.num_layers, len(config.time_grid_indices), len(config.time_grid_indices)), dtype=np.float64),
         }
 
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc="Task 2: main images", total=len(main_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         for family in _family_names(config):
             for component in ("raw", "common", "residual"):
@@ -419,7 +420,7 @@ def _run_task4_like(
     rows_by_family_metric: dict[tuple[str, str], list[dict[str, object]]] = {}
     main_rows = _main_rows(runtime)
 
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc=f"{title_prefix}: main images", total=len(main_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         for family in _family_names(config):
             for component in ("raw", "common", "residual"):
@@ -517,7 +518,7 @@ def run_task5(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     semantic_rows: list[dict[str, object]] = []
     probe_maps: dict[str, np.ndarray] = {}
 
-    for variant, array in variant_arrays.items():
+    for variant, array in progress(variant_arrays.items(), desc="Task 5: probe variants", total=len(variant_arrays)):
         samples, layer_labels, time_labels, semantic_labels, train_mask, layer_index, time_index = _probe_arrays(
             array, class_labels, train_image_mask
         )
@@ -535,6 +536,7 @@ def run_task5(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             weight_decay=config.probe_weight_decay,
             device=str(runtime.device),
             seed=config.seed,
+            progress_desc=f"Task 5 layer probe: {variant}",
         )
         time_acc, time_pred = fit_linear_classifier(
             samples[train_mask],
@@ -548,6 +550,7 @@ def run_task5(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             weight_decay=config.probe_weight_decay,
             device=str(runtime.device),
             seed=config.seed,
+            progress_desc=f"Task 5 time probe: {variant}",
         )
         semantic_acc, _ = fit_linear_classifier(
             samples[train_mask],
@@ -561,6 +564,7 @@ def run_task5(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
             weight_decay=config.probe_weight_decay,
             device=str(runtime.device),
             seed=config.seed,
+            progress_desc=f"Task 5 semantic probe: {variant}",
         )
 
         layer_rows.append({"variant": variant, "accuracy": layer_acc})
@@ -623,7 +627,7 @@ def run_task3(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
         for family in _family_names(config)
     }
 
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc="Task 3: main images", total=len(main_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         for layer in range(config.num_layers):
             for time_pos in range(len(config.time_grid_indices)):
@@ -729,13 +733,13 @@ def run_task7(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     anchors = _anchor_indices(config.patch_grid_size)
 
     with PdfPages(outdir / "task7_patch_cosmap.pdf") as patch_pdf:
-        for preview_idx, image_id in enumerate(preview["image_ids"]):
+        for preview_idx, image_id in enumerate(progress(preview["image_ids"], desc="Task 7: patch panels", total=len(preview["image_ids"]))):
             for anchor in anchors:
                 cosmap = anchor_cosine_map(preview["patch_tokens_clean"][preview_idx].float(), anchor).reshape(config.patch_grid_size, config.patch_grid_size)
                 _heatmap_page(patch_pdf, cosmap.numpy(), f"Patch cosine map {image_id} anchor {anchor}", "X", "Y")
 
     with PdfPages(outdir / "task7_mean_cosmap.pdf") as mean_pdf:
-        for preview_idx, image_id in enumerate(preview["image_ids"]):
+        for preview_idx, image_id in enumerate(progress(preview["image_ids"], desc="Task 7: mean panels", total=len(preview["image_ids"]))):
             for layer_offset, layer in enumerate(config.preview_layers_1indexed):
                 for time_offset, time_pos in enumerate(config.preview_timestep_positions):
                     for anchor in anchors:
@@ -748,7 +752,7 @@ def run_task7(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
 
     with PdfPages(outdir / "task7_tsvd_cosmap.pdf") as tsvd_pdf:
         for rank in config.tsvd_ranks:
-            for preview_idx, image_id in enumerate(preview["image_ids"]):
+            for preview_idx, image_id in enumerate(progress(preview["image_ids"], desc=f"Task 7: TSVD-{rank} panels", total=len(preview["image_ids"]))):
                 for layer_offset, layer in enumerate(config.preview_layers_1indexed):
                     for time_offset, time_pos in enumerate(config.preview_timestep_positions):
                         for anchor in anchors:
@@ -861,7 +865,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     token_sample_blocks: list[np.ndarray] = []
     hidden_rows: list[list[float]] = []
 
-    for _, row in preview_rows.iterrows():
+    for _, row in progress(preview_rows.iterrows(), desc="Task 8: fit PCA", total=len(preview_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         for family in families:
             for component in components:
@@ -908,7 +912,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     layer_labels = config.pca_panel_layers_1indexed
     time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
     with PdfPages(outdir / "task8_mean_pca_rgb.pdf") as mean_pdf, PdfPages(outdir / "task8_tsvd_visuals.pdf") as tsvd_pdf:
-        for _, row in preview_rows.iterrows():
+        for _, row in progress(preview_rows.iterrows(), desc="Task 8: render PCA panels", total=len(preview_rows)):
             bundle = _extract_bundle(runtime, row, source="main")
             for family in families:
                 target_pdf = mean_pdf if family == "mean" else tsvd_pdf
@@ -984,7 +988,7 @@ def run_task9(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     tsvd_rows: list[dict[str, object]] = []
     delta_rows: list[dict[str, object]] = []
 
-    for _, row in control_rows.iterrows():
+    for _, row in progress(control_rows.iterrows(), desc="Task 9: control images", total=len(control_rows)):
         raw_bundle = _extract_bundle(runtime, row, source="control")
         patch_bundle = _extract_bundle(runtime, row, source="control_patchshuffle")
         block_bundle = _extract_bundle(runtime, row, source="control_blockshuffle")
@@ -1093,7 +1097,7 @@ def run_task10(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -
     mean_rows: list[dict[str, object]] = []
     tsvd_rows: list[dict[str, object]] = []
 
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc="Task 10: main images", total=len(main_rows)):
         bundle = _extract_bundle(runtime, row, source="main")
         mean_common_tensor = bundle.mean_common_tokens.unsqueeze(0).expand(config.num_layers, -1, -1, -1)
         for time_pos in range(len(config.time_grid_indices)):
@@ -1165,17 +1169,24 @@ def run_task10(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -
 
 
 def run_all_tasks(config: ProtocolConfig, runtime: AnalysisRuntime, stage_dir: Path) -> dict[str, object]:
-    run_task1(config, runtime, stage_dir)
-    run_task2(config, runtime, stage_dir)
-    run_task4(config, runtime, stage_dir)
-    run_task4b_spatialnorm(config, runtime, stage_dir)
-    run_task5(config, runtime, stage_dir)
-    run_task3(config, runtime, stage_dir)
-    run_task6(config, runtime, stage_dir)
-    run_task7(config, runtime, stage_dir)
-    run_task8(config, runtime, stage_dir)
-    run_task9(config, runtime, stage_dir)
-    run_task10(config, runtime, stage_dir)
+    task_plan = [
+        ("Task 1", run_task1),
+        ("Task 2", run_task2),
+        ("Task 4", run_task4),
+        ("Task 4B", run_task4b_spatialnorm),
+        ("Task 5", run_task5),
+        ("Task 3", run_task3),
+        ("Task 6", run_task6),
+        ("Task 7", run_task7),
+        ("Task 8", run_task8),
+        ("Task 9", run_task9),
+        ("Task 10", run_task10),
+    ]
+    with progress_bar(total=len(task_plan), desc="Analysis tasks", leave=True) as bar:
+        for label, runner in task_plan:
+            bar.set_description(f"Analysis tasks | {label}")
+            runner(config, runtime, stage_dir)
+            bar.update(1)
     done = {
         "stage": "analysis",
         "tasks": [1, 2, 3, 4, "4b_spatialnorm", 5, 6, 7, 8, 9, 10],

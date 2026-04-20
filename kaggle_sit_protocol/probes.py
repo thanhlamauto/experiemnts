@@ -7,6 +7,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from .progress import progress
+
 
 @dataclass
 class ProbeResult:
@@ -36,6 +38,7 @@ def fit_linear_classifier(
     weight_decay: float,
     device: str,
     seed: int,
+    progress_desc: str | None = None,
 ) -> tuple[float, np.ndarray]:
     train_x, test_x = _standardize(train_x, test_x)
     generator = torch.Generator()
@@ -57,7 +60,10 @@ def fit_linear_classifier(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
 
-    for _ in range(epochs):
+    epoch_iter = range(epochs)
+    if progress_desc:
+        epoch_iter = progress(epoch_iter, desc=progress_desc, total=epochs)
+    for _ in epoch_iter:
         model.train()
         for xb, yb in loader:
             xb = xb.to(device)

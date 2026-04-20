@@ -18,6 +18,7 @@ from .decomposition import (
 )
 from .io_utils import estimate_bytes
 from .modeling import compute_patch_tokens, forward_features, linear_path_xt, load_sit_model
+from .progress import progress
 
 
 def _device_from_config(config: ProtocolConfig) -> torch.device:
@@ -113,7 +114,7 @@ def run_task0(config: ProtocolConfig, stage_dir: Path) -> dict[str, object]:
     sanity_residuals: list[float] = []
     orth_errors: list[float] = []
 
-    for idx, row in main_rows.iterrows():
+    for idx, row in progress(main_rows.iterrows(), desc="Task 0: main images", total=len(main_rows)):
         patch_tokens, raw_norm = _extract_raw_normalized(
             model,
             latents["main_latents"][idx],
@@ -162,7 +163,7 @@ def run_task0(config: ProtocolConfig, stage_dir: Path) -> dict[str, object]:
                     residual_tokens[layer_idx][:, time_idx].to(torch.float16)
                 )
 
-    for idx, row in control_rows.iterrows():
+    for idx, row in progress(control_rows.iterrows(), desc="Task 0: control images", total=len(control_rows)):
         _, raw_norm = _extract_raw_normalized(
             model,
             latents["control_latents"][idx],

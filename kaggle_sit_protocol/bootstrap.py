@@ -19,6 +19,7 @@ from .modeling import (
     patch_shuffle,
     preprocess_pil_image,
 )
+from .progress import progress
 
 
 def _device_from_config(config: ProtocolConfig) -> torch.device:
@@ -93,14 +94,16 @@ def run_bootstrap(config: ProtocolConfig, stage_dir: Path) -> dict[str, object]:
 
     main_images: list[torch.Tensor] = []
     main_ids: list[str] = []
-    for _, row in main_rows.iterrows():
+    for _, row in progress(main_rows.iterrows(), desc="Bootstrap: load main images", total=len(main_rows)):
         main_images.append(_load_image_tensor(str(row["absolute_path"]), config.image_size))
         main_ids.append(str(row["image_id"]))
     control_images: list[torch.Tensor] = []
     control_patch: list[torch.Tensor] = []
     control_block: list[torch.Tensor] = []
     control_ids: list[str] = []
-    for control_index, (_, row) in enumerate(control_rows.iterrows()):
+    for control_index, (_, row) in enumerate(
+        progress(control_rows.iterrows(), desc="Bootstrap: load control images", total=len(control_rows))
+    ):
         tensor = _load_image_tensor(str(row["absolute_path"]), config.image_size)
         control_images.append(tensor)
         control_patch.append(patch_shuffle(tensor, patch_size=16, seed=config.seed + control_index))
@@ -108,13 +111,21 @@ def run_bootstrap(config: ProtocolConfig, stage_dir: Path) -> dict[str, object]:
         control_ids.append(str(row["image_id"]))
 
     main_latents = []
-    for start in range(0, len(main_images), config.latent_batch_size):
+    for start in progress(
+        range(0, len(main_images), config.latent_batch_size),
+        desc="Bootstrap: encode main latents",
+        total=(len(main_images) + config.latent_batch_size - 1) // config.latent_batch_size,
+    ):
         batch = main_images[start : start + config.latent_batch_size]
         main_latents.append(_encode_batch(vae, batch, device))
     control_latents = []
     control_patch_latents = []
     control_block_latents = []
-    for start in range(0, len(control_images), config.latent_batch_size):
+    for start in progress(
+        range(0, len(control_images), config.latent_batch_size),
+        desc="Bootstrap: encode control latents",
+        total=(len(control_images) + config.latent_batch_size - 1) // config.latent_batch_size,
+    ):
         control_latents.append(_encode_batch(vae, control_images[start : start + config.latent_batch_size], device))
         control_patch_latents.append(
             _encode_batch(vae, control_patch[start : start + config.latent_batch_size], device)
