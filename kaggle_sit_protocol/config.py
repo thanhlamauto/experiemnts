@@ -19,6 +19,8 @@ class ProtocolConfig:
     dataset_search_roots: tuple[str, ...] = ("/kaggle/input",)
     dataset_name_hint: str = "miniimagenet"
     explicit_dataset_root: str | None = None
+    sampling_mode: str = "per_class"
+    probe_train_ratio: float = 0.8
 
     output_root: str = "outputs/kaggle_protocol"
     manifest_path: str = "outputs/kaggle_protocol/cache/manifest.parquet"
@@ -140,3 +142,15 @@ class ProtocolConfig:
             yield Path(self.explicit_dataset_root)
         for root in self.dataset_search_roots:
             yield Path(root)
+
+    def use_global_main_subset(
+        self,
+        main_images: int,
+        *,
+        control_images: int = 0,
+        preview_images: int = 8,
+    ) -> None:
+        self.sampling_mode = "global_arbitrary"
+        self.main_images_target = int(main_images)
+        self.control_images_target = int(control_images)
+        self.preview_images = min(int(preview_images), int(main_images))

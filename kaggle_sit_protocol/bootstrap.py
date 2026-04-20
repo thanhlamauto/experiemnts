@@ -39,6 +39,12 @@ def _encode_batch(vae: torch.nn.Module, tensors: list[torch.Tensor], device: tor
     return latents.detach().cpu().to(torch.float16)
 
 
+def _concat_or_empty(chunks: list[torch.Tensor], shape_tail: tuple[int, ...]) -> torch.Tensor:
+    if chunks:
+        return torch.cat(chunks, dim=0)
+    return torch.empty((0, *shape_tail), dtype=torch.float16)
+
+
 def _smoke_test(
     config: ProtocolConfig,
     device: torch.device,
@@ -117,10 +123,13 @@ def run_bootstrap(config: ProtocolConfig, stage_dir: Path) -> dict[str, object]:
             _encode_batch(vae, control_block[start : start + config.latent_batch_size], device)
         )
 
+    if not main_latents:
+        raise ValueError("Bootstrap requires at least one main image.")
+    latent_tail = tuple(main_latents[0].shape[1:])
     main_latents_t = torch.cat(main_latents, dim=0)
-    control_latents_t = torch.cat(control_latents, dim=0)
-    control_patch_t = torch.cat(control_patch_latents, dim=0)
-    control_block_t = torch.cat(control_block_latents, dim=0)
+    control_latents_t = _concat_or_empty(control_latents, latent_tail)
+    control_patch_t = _concat_or_empty(control_patch_latents, latent_tail)
+    control_block_t = _concat_or_empty(control_block_latents, latent_tail)
 
     main_noise = torch.randn(main_latents_t.shape, generator=generator, dtype=torch.float32).to(torch.float16)
     control_noise = torch.randn(control_latents_t.shape, generator=generator, dtype=torch.float32).to(torch.float16)
