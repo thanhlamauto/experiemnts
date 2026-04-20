@@ -799,6 +799,25 @@ def _task8_output_path(outdir: Path, stem: str, pca_mode: str) -> Path:
     return outdir / f"{stem}_{pca_mode}.pdf"
 
 
+def _task8_pages_per_image(families: list[str], components: tuple[str, ...]) -> int:
+    pages = 0
+    for family in families:
+        for component in components:
+            if family != "mean" and component == "raw":
+                continue
+            pages += 2  # before / after spatial norm
+    return pages
+
+
+def _task8_maybe_subsample_rows(array: np.ndarray, max_rows: int, seed: int) -> np.ndarray:
+    if max_rows <= 0 or array.shape[0] <= max_rows:
+        return array
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(array.shape[0], size=max_rows, replace=False)
+    indices.sort()
+    return array[indices]
+
+
 def _task8_clean_panel_specs(bundle: FeatureBundle) -> list[tuple[str, torch.Tensor, int]]:
     if bundle.latent_clean is None or bundle.patch_tokens_clean is None:
         raise ValueError("Task 8 clean panels require latent_clean and patch_tokens_clean.")
@@ -1044,11 +1063,13 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
 
     column_labels = ["vae32", "layer0"] + [f"layer{layer}" for layer in config.pca_panel_layers_1indexed]
     time_labels = [f"t={config.time_values[pos]:.2f}" for pos in config.pca_panel_timestep_positions]
+    total_render_pages = len(preview_rows) * _task8_pages_per_image(families, components)
     with PdfPages(_task8_output_path(outdir, "task8_mean_pca_rgb", pca_mode)) as mean_pdf, PdfPages(
         _task8_output_path(outdir, "task8_tsvd_visuals", pca_mode)
-    ) as tsvd_pdf:
+    ) as tsvd_pdf, progress_bar(total=total_render_pages, desc="Task 8: render pages", leave=True) as render_bar:
         for _, row in progress(preview_rows.iterrows(), desc="Task 8: render PCA panels", total=len(preview_rows)):
             bundle = _extract_bundle(runtime, row, **preview_bundle_kwargs)
+            render_bar.set_postfix_str(str(row["image_id"]), refresh=False)
             for family in families:
                 target_pdf = mean_pdf if family == "mean" else tsvd_pdf
                 for component in components:
@@ -1115,33 +1136,55 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
                             image_size=config.image_size,
                             pca_mode_label=pca_mode_label,
                         )
+                        render_bar.update(1)
 
-    token_samples = np.concatenate(token_sample_blocks, axis=0)
-    pca50 = PCA(n_components=min(50, token_samples.shape[1]), random_state=config.seed).fit_transform(token_samples)
-    tsne = TSNE(n_components=2, init="pca", random_state=config.seed, perplexity=30).fit_transform(pca50)
-    reducer = umap.UMAP(n_components=2, random_state=config.seed)
-    umap_token = reducer.fit_transform(pca50)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.scatter(tsne[:, 0], tsne[:, 1], s=4)
-    ax.set_title("Task 8 t-SNE token-level mean residual")
-    fig.tight_layout()
-    fig.savefig(_task8_output_path(outdir, "task8_mean_tsne", pca_mode))
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.scatter(umap_token[:, 0], umap_token[:, 1], s=4)
-    ax.set_title("Task 8 UMAP token-level mean residual")
-    fig.tight_layout()
-    fig.savefig(_task8_output_path(outdir, "task8_mean_umap_token", pca_mode))
-    plt.close(fig)
+    if not config.task8_enable_manifold_plots:
+        return
 
-    hidden = np.asarray(hidden_rows, dtype=np.float32)
-    hidden_umap = umap.UMAP(n_components=2, random_state=config.seed).fit_transform(hidden)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.scatter(hidden_umap[:, 0], hidden_umap[:, 1], s=10)
-    ax.set_title("Task 8 UMAP hidden-state mean family")
-    fig.tight_layout()
-    fig.savefig(_task8_output_path(outdir, "task8_mean_umap_hiddenstate", pca_mode))
-    plt.close(fig)
+    with progress_bar(total=3, desc="Task 8: manifold plots", leave=True) as manifold_bar:
+        token_samples = np.concatenate(token_sample_blocks, axis=0)
+        token_samples = _task8_maybe_subsample_rows(
+            token_samples,
+            max_rows=int(config.task8_token_manifold_max_samples),
+            seed=config.seed,
+        )
+        pca50 = PCA(n_components=min(50, token_samples.shape[1]), random_state=config.seed).fit_transform(token_samples)
+        tsne = TSNE(n_components=2, init="pca", random_state=config.seed, perplexity=30).fit_transform(pca50)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.scatter(tsne[:, 0], tsne[:, 1], s=4)
+        ax.set_title("Task 8 t-SNE token-level mean residual")
+        fig.tight_layout()
+        fig.savefig(_task8_output_path(outdir, "task8_mean_tsne", pca_mode))
+        plt.close(fig)
+        manifold_bar.update(1)
+        manifold_bar.set_postfix_str("t-SNE saved", refresh=False)
+
+        reducer = umap.UMAP(n_components=2, random_state=config.seed, n_jobs=1)
+        umap_token = reducer.fit_transform(pca50)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.scatter(umap_token[:, 0], umap_token[:, 1], s=4)
+        ax.set_title("Task 8 UMAP token-level mean residual")
+        fig.tight_layout()
+        fig.savefig(_task8_output_path(outdir, "task8_mean_umap_token", pca_mode))
+        plt.close(fig)
+        manifold_bar.update(1)
+        manifold_bar.set_postfix_str("token UMAP saved", refresh=False)
+
+        hidden = np.asarray(hidden_rows, dtype=np.float32)
+        hidden = _task8_maybe_subsample_rows(
+            hidden,
+            max_rows=int(config.task8_token_manifold_max_samples),
+            seed=config.seed,
+        )
+        hidden_umap = umap.UMAP(n_components=2, random_state=config.seed, n_jobs=1).fit_transform(hidden)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.scatter(hidden_umap[:, 0], hidden_umap[:, 1], s=10)
+        ax.set_title("Task 8 UMAP hidden-state mean family")
+        fig.tight_layout()
+        fig.savefig(_task8_output_path(outdir, "task8_mean_umap_hiddenstate", pca_mode))
+        plt.close(fig)
+        manifold_bar.update(1)
+        manifold_bar.set_postfix_str("hidden UMAP saved", refresh=False)
 
 
 def run_task9(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) -> None:

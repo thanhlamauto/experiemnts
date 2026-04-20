@@ -71,6 +71,8 @@ class ProtocolConfig:
         default_factory=lambda: DEFAULT_PCA_PANEL_TIMESTEP_POSITIONS
     )
     pca_mode: str = DEFAULT_PCA_MODE
+    task8_enable_manifold_plots: bool = False
+    task8_token_manifold_max_samples: int = 4096
     tsvd_ranks: tuple[int, ...] = field(default_factory=lambda: DEFAULT_TSVD_RANKS)
 
     smoke_images: int = 8
