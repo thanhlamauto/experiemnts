@@ -106,6 +106,7 @@ class RadialBandExperimentConfig:
     hist_bins: int = 64
     hist_quantile_low: float = 0.01
     hist_quantile_high: float = 0.99
+    hist_standardized_clip: float = 4.0
     metric_support_threshold: float = 0.7
     agreement_threshold: float = 0.5
     overall_quantile: float = 0.7
@@ -312,6 +313,7 @@ def tensor_to_descriptor(
     hist_bins: int,
     q_low: float,
     q_high: float,
+    hist_standardized_clip: float,
     eps: float,
 ) -> TensorDescriptor:
     """Convert any tensor into the shared descriptor g(T)."""
@@ -328,15 +330,16 @@ def tensor_to_descriptor(
         histogram = np.zeros(hist_bins, dtype=np.float32)
         histogram[0] = 1.0
     else:
-        low = float(torch.quantile(flat, q_low).item())
-        high = float(torch.quantile(flat, q_high).item())
+        std = float(np.sqrt(var + eps))
+        standardized = (flat - mean) / max(std, eps)
+        low = max(-float(hist_standardized_clip), float(torch.quantile(standardized, q_low).item()))
+        high = min(float(hist_standardized_clip), float(torch.quantile(standardized, q_high).item()))
         if not np.isfinite(low) or not np.isfinite(high) or high <= low + eps:
             histogram = np.zeros(hist_bins, dtype=np.float32)
             histogram[0] = 1.0
         else:
-            clipped = flat.clamp(min=low, max=high)
-            normalized = (clipped - low) / max(high - low, eps)
-            hist = torch.histc(normalized, bins=hist_bins, min=0.0, max=1.0)
+            clipped = standardized.clamp(min=low, max=high)
+            hist = torch.histc(clipped, bins=hist_bins, min=low, max=high)
             hist = hist / hist.sum().clamp_min(eps)
             histogram = hist.cpu().numpy().astype(np.float32)
 
@@ -434,7 +437,6 @@ def aggregate_layer_band_summary(scored_df: pd.DataFrame) -> pd.DataFrame:
             mean_cosine=("cosine", "mean"),
             mean_var_sim=("var_sim", "mean"),
             mean_hist_sim=("hist_sim", "mean"),
-            mean_overall=("overall_score", "mean"),
             std_overall=("overall_score", "std"),
             agreement_rate=("metric_support_count", lambda s: float(np.mean(np.asarray(s) >= 2))),
         )
@@ -443,6 +445,28 @@ def aggregate_layer_band_summary(scored_df: pd.DataFrame) -> pd.DataFrame:
     )
     summary["std_overall"] = summary["std_overall"].fillna(0.0)
     return summary
+
+
+def attach_summary_overall_scores(
+    summary_df: pd.DataFrame,
+    *,
+    cosine_weight: float,
+    var_weight: float,
+    hist_weight: float,
+) -> pd.DataFrame:
+    """Normalize aggregated mean metrics across bands within each layer."""
+
+    df = summary_df.copy()
+    group_cols = ["layer"]
+    df["mean_cosine_norm"] = df.groupby(group_cols)["mean_cosine"].transform(_minmax_or_neutral)
+    df["mean_var_sim_norm"] = df.groupby(group_cols)["mean_var_sim"].transform(_minmax_or_neutral)
+    df["mean_hist_sim_norm"] = df.groupby(group_cols)["mean_hist_sim"].transform(_minmax_or_neutral)
+    df["mean_overall"] = (
+        cosine_weight * df["mean_cosine_norm"]
+        + var_weight * df["mean_var_sim_norm"]
+        + hist_weight * df["mean_hist_sim_norm"]
+    )
+    return df
 
 
 def infer_intervals(
@@ -752,6 +776,7 @@ def run_radial_band_compatibility_experiment(
                         hist_bins=cfg.hist_bins,
                         q_low=cfg.hist_quantile_low,
                         q_high=cfg.hist_quantile_high,
+                        hist_standardized_clip=cfg.hist_standardized_clip,
                         eps=cfg.mask_eps,
                     )
                     for sample_idx in range(batch_size)
@@ -771,6 +796,7 @@ def run_radial_band_compatibility_experiment(
                         hist_bins=cfg.hist_bins,
                         q_low=cfg.hist_quantile_low,
                         q_high=cfg.hist_quantile_high,
+                        hist_standardized_clip=cfg.hist_standardized_clip,
                         eps=cfg.mask_eps,
                     )
                     for sample_idx in range(batch_size)
@@ -821,6 +847,12 @@ def run_radial_band_compatibility_experiment(
         hist_weight=cfg.hist_weight,
     )
     summary_df = aggregate_layer_band_summary(scored_df)
+    summary_df = attach_summary_overall_scores(
+        summary_df,
+        cosine_weight=cfg.cosine_weight,
+        var_weight=cfg.var_weight,
+        hist_weight=cfg.hist_weight,
+    )
     intervals_df = infer_intervals(
         summary_df,
         overall_quantile=cfg.overall_quantile,
@@ -916,6 +948,7 @@ __all__ = [
     "RadialBandExperimentConfig",
     "TensorDescriptor",
     "apply_bandpass_fft",
+    "attach_summary_overall_scores",
     "build_equal_area_bands",
     "build_radial_coordinate_map",
     "build_soft_band_mask",
