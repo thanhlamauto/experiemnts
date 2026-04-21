@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .config import ProtocolConfig
+from .radial_band_compat import RadialBandExperimentConfig, run_radial_band_compatibility_experiment
 
 if TYPE_CHECKING:
     from .stages import AnalysisRuntime
@@ -36,7 +37,9 @@ def create_analysis_runtime(*args: Any, **kwargs: Any):
 
 __all__ = [
     "ProtocolConfig",
+    "RadialBandExperimentConfig",
     "create_analysis_runtime",
+    "run_radial_band_compatibility_experiment",
     "run_analysis_stage",
     "run_bootstrap_stage",
     "run_task0_stage",
