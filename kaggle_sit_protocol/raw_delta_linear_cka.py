@@ -8,21 +8,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from kaggle_sit_protocol.config import ProtocolConfig
-    from kaggle_sit_protocol.metrics import pairwise_cos_batchmean_nd
-    from kaggle_sit_protocol.model_specs import apply_sit_model_spec
+    from kaggle_sit_protocol.model_specs import apply_sit_model_spec, sit_model_slug
     from kaggle_sit_protocol.modeling import forward_features, load_sit_model
     from kaggle_sit_protocol.progress import progress
 else:
     from .config import ProtocolConfig
-    from .metrics import pairwise_cos_batchmean_nd
-    from .model_specs import apply_sit_model_spec
+    from .model_specs import apply_sit_model_spec, sit_model_slug
     from .modeling import forward_features, load_sit_model
     from .progress import progress
 
@@ -35,7 +32,10 @@ def _device_from_config(config: ProtocolConfig) -> torch.device:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute pairwise cosine similarities for layer deltas L_i - L_{i-1} on SiT block outputs."
+        description=(
+            "Compute mean linear-CKA heatmaps for raw SiT block activations and "
+            "layer deltas L_i - L_{i-1}."
+        )
     )
     parser.add_argument(
         "--model-name",
@@ -100,8 +100,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--eps",
         type=float,
-        default=1e-8,
-        help="Numerical epsilon used by the cosine normalizations.",
+        default=1e-12,
+        help="Numerical epsilon used by the CKA normalization.",
     )
     parser.add_argument(
         "--amp-dtype",
@@ -158,6 +158,21 @@ def _autocast_context(device: torch.device, amp_dtype: torch.dtype | None):
     return torch.autocast(device_type=device.type, dtype=amp_dtype)
 
 
+def _pairwise_linear_cka_batched(tensors: torch.Tensor, eps: float) -> torch.Tensor:
+    if tensors.ndim != 4:
+        raise ValueError(f"Expected [B, L, N, D] tensor, got {tuple(tensors.shape)}")
+
+    centered = tensors.float() - tensors.float().mean(dim=2, keepdim=True)
+    grams = torch.matmul(centered, centered.transpose(-1, -2))
+    flat = grams.reshape(grams.shape[0], grams.shape[1], -1)
+    hsic = torch.einsum("bli,bji->blj", flat, flat)
+    denom = (
+        torch.diagonal(hsic, dim1=-2, dim2=-1).clamp_min(eps).sqrt().unsqueeze(-1)
+        * torch.diagonal(hsic, dim1=-2, dim2=-1).clamp_min(eps).sqrt().unsqueeze(-2)
+    )
+    return (hsic / denom.clamp_min(eps)).clamp_(0.0, 1.0)
+
+
 @torch.no_grad()
 def _accumulate_batch_metrics(
     *,
@@ -167,9 +182,8 @@ def _accumulate_batch_metrics(
     x1: torch.Tensor,
     x0: torch.Tensor,
     labels: torch.Tensor,
-    flat_gram: torch.Tensor,
-    token_sum: torch.Tensor,
-    batchmean_sum: torch.Tensor,
+    raw_sum: torch.Tensor,
+    delta_sum: torch.Tensor,
     forward_batch_size: int,
     eps: float,
     amp_dtype: torch.dtype | None,
@@ -191,56 +205,55 @@ def _accumulate_batch_metrics(
             t_chunk = torch.full((stop - start,), time_value_f, device=device, dtype=torch.float32)
             with _autocast_context(device, amp_dtype):
                 _, blocks = forward_features(model, xt_chunk, t_chunk, labels_chunk)
-            delta = (blocks[1:] - blocks[:-1]).float()
-            delta_norm = F.normalize(delta, dim=-1, eps=eps)
 
-            flat_gram[time_pos] += torch.einsum("lbnd,ibnd->li", delta, delta).to(dtype=torch.float64).cpu()
-            token_sum[time_pos] += torch.einsum("lbnd,ibnd->li", delta_norm, delta_norm).to(dtype=torch.float64).cpu()
-            batchmean_sum[time_pos] += delta.sum(dim=1).cpu()
+            raw_batched = blocks.permute(1, 0, 2, 3).contiguous()
+            raw_sum[time_pos] += _pairwise_linear_cka_batched(raw_batched, eps=eps).sum(dim=0).to(torch.float64).cpu()
 
-            del xt_chunk, t_chunk, blocks, delta, delta_norm
+            deltas = (blocks[1:] - blocks[:-1]).permute(1, 0, 2, 3).contiguous()
+            delta_sum[time_pos] += _pairwise_linear_cka_batched(deltas, eps=eps).sum(dim=0).to(torch.float64).cpu()
+
+            del xt_chunk, t_chunk, blocks, raw_batched, deltas
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
     del x1, x0, labels
 
 
-def _finalize_flatcos(gram: torch.Tensor, eps: float) -> torch.Tensor:
-    diag = torch.diagonal(gram, dim1=-2, dim2=-1).clamp_min(eps).sqrt()
-    denom = diag.unsqueeze(-1) * diag.unsqueeze(-2)
-    return gram / denom.clamp_min(eps)
-
-
-def _finalize_batchmean(sum_over_batch: torch.Tensor, batch_count: int, eps: float) -> torch.Tensor:
-    mean_tensor = (sum_over_batch / float(max(batch_count, 1))).unsqueeze(2)
-    per_time = []
-    for time_pos in range(mean_tensor.shape[0]):
-        per_time.append(pairwise_cos_batchmean_nd(mean_tensor[time_pos], eps=eps))
-    return torch.stack(per_time, dim=0)
-
-
 def _longform_rows(
-    metric_name: str,
+    *,
+    kind: str,
     matrix_by_time: np.ndarray,
     time_indices: tuple[int, ...],
     time_values: tuple[float, ...],
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    num_deltas = int(matrix_by_time.shape[1])
+    num_layers = int(matrix_by_time.shape[1])
     for time_pos, (time_index, time_value) in enumerate(zip(time_indices, time_values)):
         matrix = matrix_by_time[time_pos]
-        for i in range(num_deltas):
-            for j in range(num_deltas):
+        for i in range(num_layers):
+            for j in range(num_layers):
+                if kind == "raw":
+                    layer_i = i + 1
+                    layer_j = j + 1
+                    label_i = f"L{layer_i}"
+                    label_j = f"L{layer_j}"
+                elif kind == "delta":
+                    layer_i = i + 2
+                    layer_j = j + 2
+                    label_i = f"L{layer_i}-L{layer_i - 1}"
+                    label_j = f"L{layer_j}-L{layer_j - 1}"
+                else:
+                    raise ValueError(f"Unsupported kind={kind!r}")
                 rows.append(
                     {
-                        "metric": metric_name,
+                        "kind": kind,
                         "time_position": time_pos,
                         "time_index": int(time_index),
                         "time_value": float(time_value),
-                        "delta_i": i + 2,
-                        "delta_j": j + 2,
-                        "delta_i_label": f"L{i + 2}-L{i + 1}",
-                        "delta_j_label": f"L{j + 2}-L{j + 1}",
+                        "layer_i": layer_i,
+                        "layer_j": layer_j,
+                        "layer_i_label": label_i,
+                        "layer_j_label": label_j,
                         "value": float(matrix[i, j]),
                     }
                 )
@@ -260,10 +273,11 @@ def main() -> None:
         config.device = str(args.device)
     config.ensure_directories()
 
+    model_slug = sit_model_slug(config.model_name).lower()
     outdir = (
         Path(args.output_dir)
         if args.output_dir is not None
-        else config.analysis_dir / f"residual_delta_cosine_{args.subset_role}"
+        else config.analysis_dir / f"raw_delta_linear_cka_{model_slug}_{args.subset_role}"
     )
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -283,20 +297,13 @@ def main() -> None:
 
     latent_key, noise_key, position_lookup = _subset_arrays(args.subset_role, latents, noise)
     num_times = len(config.time_values)
-    num_delta_layers = config.num_layers - 1
-    num_tokens = config.patch_grid_size * config.patch_grid_size
-
-    flat_gram = torch.zeros((num_times, num_delta_layers, num_delta_layers), dtype=torch.float64)
-    token_sum = torch.zeros((num_times, num_delta_layers, num_delta_layers), dtype=torch.float64)
-    batchmean_sum = torch.zeros(
-        (num_times, num_delta_layers, num_tokens, config.hidden_dim),
-        dtype=torch.float32,
-    )
+    raw_sum = torch.zeros((num_times, config.num_layers, config.num_layers), dtype=torch.float64)
+    delta_sum = torch.zeros((num_times, config.num_layers - 1, config.num_layers - 1), dtype=torch.float64)
     image_count = 0
 
     for start in progress(
         range(0, len(subset_rows), args.image_batch_size),
-        desc="Residual delta cosine",
+        desc="Raw/delta linear CKA",
         total=(len(subset_rows) + args.image_batch_size - 1) // args.image_batch_size,
     ):
         batch_rows = subset_rows.iloc[start : start + args.image_batch_size]
@@ -311,9 +318,8 @@ def main() -> None:
             x1=x1,
             x0=x0,
             labels=labels,
-            flat_gram=flat_gram,
-            token_sum=token_sum,
-            batchmean_sum=batchmean_sum,
+            raw_sum=raw_sum,
+            delta_sum=delta_sum,
             forward_batch_size=forward_batch_size,
             eps=args.eps,
             amp_dtype=amp_dtype,
@@ -323,51 +329,61 @@ def main() -> None:
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    flatcos = _finalize_flatcos(flat_gram, eps=args.eps).cpu()
-    tokenwise = (token_sum / float(max(image_count * num_tokens, 1))).cpu()
-    batchmean = _finalize_batchmean(batchmean_sum, batch_count=image_count, eps=args.eps).cpu()
+    raw_mean = (raw_sum / float(max(image_count, 1))).numpy().astype(np.float32)
+    delta_mean = (delta_sum / float(max(image_count, 1))).numpy().astype(np.float32)
 
     np.savez(
-        outdir / "residual_delta_cosine_matrices.npz",
+        outdir / "raw_delta_linear_cka_matrices.npz",
+        model_name=np.array(config.model_name),
         subset_role=np.array(args.subset_role),
         image_count=np.array(image_count, dtype=np.int64),
         time_positions=np.arange(num_times, dtype=np.int64),
         time_indices=np.array(config.time_grid_indices, dtype=np.int64),
         time_values=np.array(config.time_values, dtype=np.float32),
+        raw_layers=np.arange(1, config.num_layers + 1, dtype=np.int64),
         delta_layers=np.arange(2, config.num_layers + 1, dtype=np.int64),
-        flat_bnd=flatcos.numpy().astype(np.float32),
-        tokenwise=tokenwise.numpy().astype(np.float32),
-        batchmean_nd=batchmean.numpy().astype(np.float32),
-        flat_bnd_mean_over_time=flatcos.mean(dim=0).numpy().astype(np.float32),
-        tokenwise_mean_over_time=tokenwise.mean(dim=0).numpy().astype(np.float32),
-        batchmean_nd_mean_over_time=batchmean.mean(dim=0).numpy().astype(np.float32),
+        raw=raw_mean,
+        delta=delta_mean,
+        raw_mean_over_time=raw_mean.mean(axis=0).astype(np.float32),
+        delta_mean_over_time=delta_mean.mean(axis=0).astype(np.float32),
     )
 
     rows: list[dict[str, object]] = []
-    rows.extend(_longform_rows("flat_bnd", flatcos.numpy(), config.time_grid_indices, config.time_values))
-    rows.extend(_longform_rows("tokenwise", tokenwise.numpy(), config.time_grid_indices, config.time_values))
-    rows.extend(_longform_rows("batchmean_nd", batchmean.numpy(), config.time_grid_indices, config.time_values))
-    pd.DataFrame(rows).to_csv(outdir / "residual_delta_cosine_long.csv", index=False)
+    rows.extend(
+        _longform_rows(
+            kind="raw",
+            matrix_by_time=raw_mean,
+            time_indices=config.time_grid_indices,
+            time_values=config.time_values,
+        )
+    )
+    rows.extend(
+        _longform_rows(
+            kind="delta",
+            matrix_by_time=delta_mean,
+            time_indices=config.time_grid_indices,
+            time_values=config.time_values,
+        )
+    )
+    pd.DataFrame(rows).to_csv(outdir / "raw_delta_linear_cka_long.csv", index=False)
 
-    mean_over_time_rows = []
-    for metric_name, matrix in (
-        ("flat_bnd", flatcos.mean(dim=0).numpy()),
-        ("tokenwise", tokenwise.mean(dim=0).numpy()),
-        ("batchmean_nd", batchmean.mean(dim=0).numpy()),
-    ):
-        for i in range(num_delta_layers):
-            for j in range(num_delta_layers):
-                mean_over_time_rows.append(
-                    {
-                        "metric": metric_name,
-                        "delta_i": i + 2,
-                        "delta_j": j + 2,
-                        "delta_i_label": f"L{i + 2}-L{i + 1}",
-                        "delta_j_label": f"L{j + 2}-L{j + 1}",
-                        "value": float(matrix[i, j]),
-                    }
-                )
-    pd.DataFrame(mean_over_time_rows).to_csv(outdir / "residual_delta_cosine_mean_over_time.csv", index=False)
+    mean_rows: list[dict[str, object]] = []
+    for kind, matrix in (("raw", raw_mean.mean(axis=0)), ("delta", delta_mean.mean(axis=0))):
+        for row in _longform_rows(
+            kind=kind,
+            matrix_by_time=matrix[None, ...],
+            time_indices=(config.time_grid_indices[0],),
+            time_values=(config.time_values[0],),
+        ):
+            row.pop("time_position", None)
+            row.pop("time_index", None)
+            row.pop("time_value", None)
+            mean_rows.append(row)
+    pd.DataFrame(mean_rows).to_csv(outdir / "raw_delta_linear_cka_mean_over_time.csv", index=False)
+
+    print(f"Saved matrices to: {outdir / 'raw_delta_linear_cka_matrices.npz'}")
+    print(f"Saved long-form CSV to: {outdir / 'raw_delta_linear_cka_long.csv'}")
+    print(f"Saved mean-over-time CSV to: {outdir / 'raw_delta_linear_cka_mean_over_time.csv'}")
 
 
 if __name__ == "__main__":

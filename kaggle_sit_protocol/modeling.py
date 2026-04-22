@@ -9,6 +9,7 @@ from typing import Iterable
 import torch
 
 from .config import ProtocolConfig
+from .model_specs import apply_sit_model_spec, candidate_sit_checkpoint_names, iter_sit_checkpoint_candidates
 
 
 def _ensure_sit_on_path(config: ProtocolConfig) -> None:
@@ -54,12 +55,30 @@ def load_sit_model(config: ProtocolConfig, device: torch.device) -> torch.nn.Mod
     from SiT.download import find_model
     from SiT.models import SiT_models
 
+    apply_sit_model_spec(config)
     model = SiT_models[config.model_name](
         input_size=config.latent_size,
         num_classes=config.num_classes,
         learn_sigma=config.learn_sigma,
     ).to(device)
-    ckpt = config.checkpoint_path or "SiT-XL-2-256x256.pt"
+    if config.checkpoint_path:
+        ckpt = str(config.checkpoint_path)
+    else:
+        ckpt = None
+        for candidate in iter_sit_checkpoint_candidates(config.model_name, config.image_size):
+            if candidate.is_file():
+                ckpt = str(candidate)
+                break
+        if ckpt is None:
+            default_name = candidate_sit_checkpoint_names(config.model_name, config.image_size)[0]
+            if default_name == "SiT-XL-2-256x256.pt":
+                ckpt = default_name
+            else:
+                searched = ", ".join(str(path) for path in iter_sit_checkpoint_candidates(config.model_name, config.image_size))
+                raise FileNotFoundError(
+                    f"Could not find a checkpoint for {config.model_name!r}. "
+                    f"Looked for: {searched}. Set config.checkpoint_path to a local .pt checkpoint."
+                )
     state_dict = find_model(ckpt)
     model.load_state_dict(state_dict, strict=False)
     model.eval()

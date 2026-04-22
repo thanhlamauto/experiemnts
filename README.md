@@ -43,6 +43,29 @@ Các notebook này thực hiện:
 - chạy Task 1-10 kèm `Task 4B spatial norm` từ cache gọn để giữ output an toàn dưới giới hạn Kaggle
 - xuất PCA-RGB panel cho `raw/common/residual` cả trước và sau spatial norm trong `Task 8`
 
+Heatmap linear CKA cho raw activation và residual delta `L_i - L_{i-1}`:
+
+```bash
+python kaggle_sit_protocol/raw_delta_linear_cka.py \
+  --model-name SiT-XL/2 \
+  --output-root outputs/kaggle_protocol
+
+python kaggle_sit_protocol/plot_raw_delta_linear_cka.py \
+  --input-dir outputs/kaggle_protocol/analysis/raw_delta_linear_cka_sit-xl-2_main
+```
+
+Để đo trên `SiT-B/2`, truyền checkpoint local của model đó:
+
+```bash
+python kaggle_sit_protocol/raw_delta_linear_cka.py \
+  --model-name SiT-B/2 \
+  --checkpoint-path /path/to/SiT-B-2-256x256.pt \
+  --output-root outputs/kaggle_protocol
+
+python kaggle_sit_protocol/plot_raw_delta_linear_cka.py \
+  --input-dir outputs/kaggle_protocol/analysis/raw_delta_linear_cka_sit-b-2_main
+```
+
 Package entrypoints:
 
 ```python
