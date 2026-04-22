@@ -29,6 +29,33 @@ def flat_cosine(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-6) -> torch.Te
     return torch.dot(x_flat, y_flat) / denom.clamp_min(eps)
 
 
+def layer_delta_residuals(tensors: torch.Tensor) -> torch.Tensor:
+    if tensors.ndim != 4:
+        raise ValueError(f"Expected [L, B, N, D] tensor, got {tuple(tensors.shape)}")
+    if tensors.shape[0] < 2:
+        raise ValueError("Need at least two layers to form L_i - L_{i-1} deltas.")
+    return tensors[1:] - tensors[:-1]
+
+
+def pairwise_cos_flat_bnd(tensors: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    x = tensors.float().reshape(tensors.shape[0], -1)
+    x = F.normalize(x, dim=1, eps=eps)
+    return x @ x.T
+
+
+def pairwise_cos_tokenwise(tensors: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    x = F.normalize(tensors.float(), dim=-1, eps=eps)
+    sim = torch.einsum("lbnd,ibnd->libn", x, x)
+    return sim.mean(dim=(-1, -2))
+
+
+def pairwise_cos_batchmean_nd(tensors: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    x = tensors.float().mean(dim=1)
+    x = x.reshape(x.shape[0], -1)
+    x = F.normalize(x, dim=1, eps=eps)
+    return x @ x.T
+
+
 def tensor_stats(z: torch.Tensor, eps: float = 1e-6) -> dict[str, float]:
     z_norm = z / (z.norm(dim=-1, keepdim=True) + eps)
     return {
