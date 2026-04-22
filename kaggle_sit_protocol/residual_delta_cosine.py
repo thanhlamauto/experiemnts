@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -15,12 +16,12 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(repo_root))
     from kaggle_sit_protocol.config import ProtocolConfig
     from kaggle_sit_protocol.metrics import pairwise_cos_batchmean_nd
-    from kaggle_sit_protocol.modeling import forward_features, linear_path_xt, load_sit_model
+    from kaggle_sit_protocol.modeling import forward_features, load_sit_model
     from kaggle_sit_protocol.progress import progress
 else:
     from .config import ProtocolConfig
     from .metrics import pairwise_cos_batchmean_nd
-    from .modeling import forward_features, linear_path_xt, load_sit_model
+    from .modeling import forward_features, load_sit_model
     from .progress import progress
 
 
@@ -53,6 +54,12 @@ def _parse_args() -> argparse.Namespace:
         help="How many images to process together when recomputing block outputs.",
     )
     parser.add_argument(
+        "--forward-batch-size",
+        type=int,
+        default=None,
+        help="Micro-batch size inside each timestep forward pass. Defaults to cfg.extraction_batch_size.",
+    )
+    parser.add_argument(
         "--device",
         choices=("cuda", "cpu"),
         default=None,
@@ -82,6 +89,12 @@ def _parse_args() -> argparse.Namespace:
         default=1e-8,
         help="Numerical epsilon used by the cosine normalizations.",
     )
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("none", "float16", "bfloat16"),
+        default="float16",
+        help="Autocast dtype on CUDA for lower activation memory.",
+    )
     return parser.parse_args()
 
 
@@ -103,36 +116,71 @@ def _subset_arrays(
     return latent_key, noise_key, {str(image_id): idx for idx, image_id in enumerate(ids)}
 
 
+def _resolve_forward_batch_size(args: argparse.Namespace, config: ProtocolConfig) -> int:
+    if args.forward_batch_size is not None:
+        return max(int(args.forward_batch_size), 1)
+    return max(int(config.extraction_batch_size), 1)
+
+
+def _resolve_amp_dtype(device: torch.device, amp_dtype: str) -> torch.dtype | None:
+    if device.type != "cuda" or amp_dtype == "none":
+        return None
+    if amp_dtype == "bfloat16":
+        return torch.bfloat16
+    return torch.float16
+
+
+def _autocast_context(device: torch.device, amp_dtype: torch.dtype | None):
+    if amp_dtype is None:
+        return nullcontext()
+    return torch.autocast(device_type=device.type, dtype=amp_dtype)
+
+
 @torch.no_grad()
-def _extract_block_batch(
+def _accumulate_batch_metrics(
+    *,
     model: torch.nn.Module,
     config: ProtocolConfig,
     device: torch.device,
     x1: torch.Tensor,
     x0: torch.Tensor,
     labels: torch.Tensor,
-) -> torch.Tensor:
+    flat_gram: torch.Tensor,
+    token_sum: torch.Tensor,
+    batchmean_sum: torch.Tensor,
+    forward_batch_size: int,
+    eps: float,
+    amp_dtype: torch.dtype | None,
+) -> None:
     x1 = x1.to(device=device, dtype=torch.float32)
     x0 = x0.to(device=device, dtype=torch.float32)
     labels = labels.to(device=device, dtype=torch.long)
-    timesteps = torch.tensor(config.time_values, device=device, dtype=torch.float32)
-    xt = linear_path_xt(x1, x0, timesteps)
+
     batch_size = int(x1.shape[0])
-    num_times = int(timesteps.shape[0])
-    flat_xt = xt.permute(1, 0, 2, 3, 4).reshape(batch_size * num_times, *x1.shape[1:])
-    flat_t = timesteps.repeat(batch_size)
-    flat_labels = labels.repeat_interleave(num_times)
-    _, blocks = forward_features(model, flat_xt, flat_t, flat_labels)
-    return blocks.reshape(config.num_layers, batch_size, num_times, blocks.shape[-2], blocks.shape[-1]).detach().cpu()
+    for time_pos, time_value in enumerate(config.time_values):
+        time_value_f = float(time_value)
+        for start in range(0, batch_size, forward_batch_size):
+            stop = min(start + forward_batch_size, batch_size)
+            x1_chunk = x1[start:stop]
+            x0_chunk = x0[start:stop]
+            labels_chunk = labels[start:stop]
 
+            xt_chunk = time_value_f * x1_chunk + (1.0 - time_value_f) * x0_chunk
+            t_chunk = torch.full((stop - start,), time_value_f, device=device, dtype=torch.float32)
+            with _autocast_context(device, amp_dtype):
+                _, blocks = forward_features(model, xt_chunk, t_chunk, labels_chunk)
+            delta = (blocks[1:] - blocks[:-1]).float()
+            delta_norm = F.normalize(delta, dim=-1, eps=eps)
 
-def _streaming_flat_gram(tensors: torch.Tensor) -> torch.Tensor:
-    return torch.einsum("tlbnd,tibnd->tli", tensors, tensors)
+            flat_gram[time_pos] += torch.einsum("lbnd,ibnd->li", delta, delta).to(dtype=torch.float64).cpu()
+            token_sum[time_pos] += torch.einsum("lbnd,ibnd->li", delta_norm, delta_norm).to(dtype=torch.float64).cpu()
+            batchmean_sum[time_pos] += delta.sum(dim=1).cpu()
 
+            del xt_chunk, t_chunk, blocks, delta, delta_norm
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
-def _streaming_token_sum(tensors: torch.Tensor, eps: float) -> torch.Tensor:
-    x = F.normalize(tensors, dim=-1, eps=eps)
-    return torch.einsum("tlbnd,tibnd->tli", x, x)
+    del x1, x0, labels
 
 
 def _finalize_flatcos(gram: torch.Tensor, eps: float) -> torch.Tensor:
@@ -201,6 +249,8 @@ def main() -> None:
     noise = torch.load(config.cache_dir / "x0_noise_seed0_fp16.pt", map_location="cpu")
     device = _device_from_config(config)
     model = load_sit_model(config, device)
+    forward_batch_size = _resolve_forward_batch_size(args, config)
+    amp_dtype = _resolve_amp_dtype(device, args.amp_dtype)
 
     subset_rows = manifest[manifest["subset_role"] == args.subset_role].reset_index(drop=True)
     if args.max_images is not None:
@@ -231,14 +281,24 @@ def main() -> None:
         x1 = latents[latent_key][positions]
         x0 = noise[noise_key][positions]
         labels = torch.as_tensor(batch_rows["imagenet_idx"].to_numpy(), dtype=torch.long)
-
-        blocks = _extract_block_batch(model, config, device, x1, x0, labels).float()
-        delta = (blocks[1:] - blocks[:-1]).permute(2, 0, 1, 3, 4).contiguous()
-
-        flat_gram += _streaming_flat_gram(delta).to(torch.float64)
-        token_sum += _streaming_token_sum(delta, eps=args.eps).to(torch.float64)
-        batchmean_sum += delta.sum(dim=2)
+        _accumulate_batch_metrics(
+            model=model,
+            config=config,
+            device=device,
+            x1=x1,
+            x0=x0,
+            labels=labels,
+            flat_gram=flat_gram,
+            token_sum=token_sum,
+            batchmean_sum=batchmean_sum,
+            forward_batch_size=forward_batch_size,
+            eps=args.eps,
+            amp_dtype=amp_dtype,
+        )
         image_count += len(batch_rows)
+        del x1, x0, labels
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     flatcos = _finalize_flatcos(flat_gram, eps=args.eps).cpu()
     tokenwise = (token_sum / float(max(image_count * num_tokens, 1))).cpu()
