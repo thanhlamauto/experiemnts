@@ -978,6 +978,7 @@ def run_task8(config: ProtocolConfig, runtime: AnalysisRuntime, outdir: Path) ->
     families = _family_names(config)
     components = ("raw", "common", "residual")
     pca_mode = _task8_pca_mode(config)
+    print(f"Task 8 outputs use mode: {pca_mode}")
     use_shared_pca = pca_mode == "shared_global"
     pca_mode_label = "shared_global" if use_shared_pca else "sra_local"
     preview_extract_kwargs: dict[str, tuple[int, ...]] = {}
