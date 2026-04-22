@@ -1,4 +1,5 @@
 .hf_home/
+.venv/
 .pytest_cache/
 .venv-backups/
 __pycache__/
@@ -8,6 +9,8 @@ __pycache__/
 *.pyd
 
 outputs_bundle_20260329.zip
+data/
+pretrained_models/
 
 REPA/pretrained_models/*.pt
 SiT/pretrained_models/*.pt
