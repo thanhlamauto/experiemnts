@@ -59,6 +59,18 @@ def _parse_args() -> argparse.Namespace:
         help="Override ProtocolConfig.device.",
     )
     parser.add_argument(
+        "--output-root",
+        type=str,
+        default=None,
+        help="Protocol output root containing cache/manifest from bootstrap/task0.",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        type=str,
+        default=None,
+        help="Optional explicit manifest path override.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
@@ -168,6 +180,11 @@ def _longform_rows(
 def main() -> None:
     args = _parse_args()
     config = ProtocolConfig.from_kaggle_defaults()
+    if args.output_root is not None:
+        config.output_root = str(args.output_root)
+        config.manifest_path = f"{config.output_root}/cache/manifest.parquet"
+    if args.manifest_path is not None:
+        config.manifest_path = str(args.manifest_path)
     if args.device is not None:
         config.device = str(args.device)
     config.ensure_directories()
