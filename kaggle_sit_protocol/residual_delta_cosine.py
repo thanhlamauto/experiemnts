@@ -36,6 +36,18 @@ def _parse_args() -> argparse.Namespace:
         description="Compute pairwise cosine similarities for layer deltas L_i - L_{i-1} on SiT block outputs."
     )
     parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="Override ProtocolConfig.model_name, e.g. SiT-B/2.",
+    )
+    parser.add_argument(
+        "--checkpoint-path",
+        type=str,
+        default=None,
+        help="Optional explicit checkpoint path for the requested model.",
+    )
+    parser.add_argument(
         "--subset-role",
         choices=("main", "control"),
         default="main",
@@ -114,6 +126,35 @@ def _subset_arrays(
     else:
         raise ValueError(f"Unsupported subset_role={subset_role!r}")
     return latent_key, noise_key, {str(image_id): idx for idx, image_id in enumerate(ids)}
+
+
+def _apply_model_overrides(config: ProtocolConfig, args: argparse.Namespace) -> None:
+    if args.model_name is not None:
+        config.model_name = str(args.model_name)
+    if args.checkpoint_path is not None:
+        config.checkpoint_path = str(args.checkpoint_path)
+
+    specs = {
+        "SiT-XL/2": {"hidden_dim": 1152, "num_layers": 28},
+        "SiT-XL/4": {"hidden_dim": 1152, "num_layers": 28},
+        "SiT-XL/8": {"hidden_dim": 1152, "num_layers": 28},
+        "SiT-L/2": {"hidden_dim": 1024, "num_layers": 24},
+        "SiT-L/4": {"hidden_dim": 1024, "num_layers": 24},
+        "SiT-L/8": {"hidden_dim": 1024, "num_layers": 24},
+        "SiT-B/2": {"hidden_dim": 768, "num_layers": 12},
+        "SiT-B/4": {"hidden_dim": 768, "num_layers": 12},
+        "SiT-B/8": {"hidden_dim": 768, "num_layers": 12},
+        "SiT-S/2": {"hidden_dim": 384, "num_layers": 12},
+        "SiT-S/4": {"hidden_dim": 384, "num_layers": 12},
+        "SiT-S/8": {"hidden_dim": 384, "num_layers": 12},
+    }
+    if config.model_name not in specs:
+        raise ValueError(
+            f"Unsupported model_name={config.model_name!r} for residual delta cosine. "
+            f"Known models: {sorted(specs)}"
+        )
+    config.hidden_dim = int(specs[config.model_name]["hidden_dim"])
+    config.num_layers = int(specs[config.model_name]["num_layers"])
 
 
 def _resolve_forward_batch_size(args: argparse.Namespace, config: ProtocolConfig) -> int:
@@ -233,6 +274,7 @@ def main() -> None:
         config.manifest_path = f"{config.output_root}/cache/manifest.parquet"
     if args.manifest_path is not None:
         config.manifest_path = str(args.manifest_path)
+    _apply_model_overrides(config, args)
     if args.device is not None:
         config.device = str(args.device)
     config.ensure_directories()
