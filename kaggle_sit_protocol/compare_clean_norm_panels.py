@@ -101,7 +101,31 @@ def _parse_args() -> argparse.Namespace:
         "--device",
         choices=("cuda", "cpu"),
         default=None,
-        help="Override ProtocolConfig.device.",
+        help="Legacy override for ProtocolConfig.device. Prefer --vae-device and --patchify-device.",
+    )
+    parser.add_argument(
+        "--vae-device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+        help="Device for VAE encoding. Defaults to CUDA when available.",
+    )
+    parser.add_argument(
+        "--patchify-device",
+        choices=("auto", "cuda", "cpu"),
+        default="cpu",
+        help="Device for SiT patch embedding. Defaults to CPU to avoid keeping VAE and SiT on GPU together.",
+    )
+    parser.add_argument(
+        "--vae-dtype",
+        choices=("auto", "float32", "float16", "bfloat16"),
+        default="auto",
+        help="Compute dtype for the VAE. Defaults to float16 on CUDA, float32 on CPU.",
+    )
+    parser.add_argument(
+        "--patchify-dtype",
+        choices=("auto", "float32", "float16", "bfloat16"),
+        default="auto",
+        help="Compute dtype for patchify0. Defaults to float32 on CPU, float16 on CUDA.",
     )
     parser.add_argument(
         "--subset-role",
@@ -209,6 +233,28 @@ def _device_from_config(config: ProtocolConfig) -> torch.device:
     return torch.device("cpu")
 
 
+def _resolve_runtime_device(requested: str) -> torch.device:
+    token = str(requested).strip().lower()
+    if token == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if token == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("Requested CUDA device but torch.cuda.is_available() is False.")
+    return torch.device(token)
+
+
+def _resolve_runtime_dtype(requested: str, device: torch.device, *, cpu_default: torch.dtype, cuda_default: torch.dtype) -> torch.dtype:
+    token = str(requested).strip().lower()
+    if token == "auto":
+        return cuda_default if device.type == "cuda" else cpu_default
+    if token == "float16":
+        return torch.float16
+    if token == "bfloat16":
+        return torch.bfloat16
+    if token == "float32":
+        return torch.float32
+    raise ValueError(f"Unsupported dtype request {requested!r}")
+
+
 def _parse_csv_strings(value: str | None) -> list[str]:
     if value is None:
         return []
@@ -275,7 +321,7 @@ def _prepare_pil_image(image: Image.Image, image_size: int) -> Image.Image:
 
 
 def _pil_to_tensor(image: Image.Image) -> torch.Tensor:
-    array = torch.from_numpy(np.asarray(image)).permute(2, 0, 1).float() / 255.0
+    array = torch.from_numpy(np.array(image, copy=True)).permute(2, 0, 1).float() / 255.0
     return array * 2.0 - 1.0
 
 
@@ -548,19 +594,28 @@ def _compute_stage_maps(
     model: torch.nn.Module,
     vae: torch.nn.Module,
     image_tensor: torch.Tensor,
-    device: torch.device,
+    vae_device: torch.device,
+    patchify_device: torch.device,
+    vae_dtype: torch.dtype,
+    patchify_dtype: torch.dtype,
     sample_latent: bool,
 ) -> dict[str, torch.Tensor]:
-    batch = image_tensor.unsqueeze(0).to(device=device, dtype=torch.float32)
+    batch = image_tensor.unsqueeze(0).to(device=vae_device, dtype=vae_dtype)
     posterior = vae.encode(batch).latent_dist
     latent = posterior.sample() if sample_latent else posterior.mode()
     latent = latent.mul(0.18215)
+    latent_cpu = latent.squeeze(0).float().cpu()
 
-    patch_tokens = compute_patch_tokens(model, latent).squeeze(0).float()
+    latent_for_patchify = latent.to(device=patchify_device, dtype=patchify_dtype)
+    patch_tokens = compute_patch_tokens(model, latent_for_patchify).squeeze(0).float().cpu()
     patch_grid = _tensor_grid_size(patch_tokens)
 
+    del batch, posterior, latent, latent_for_patchify
+    if vae_device.type == "cuda" or patchify_device.type == "cuda":
+        torch.cuda.empty_cache()
+
     return {
-        "latent32": latent.squeeze(0).float(),
+        "latent32": latent_cpu,
         "patchify0": _tokens_to_map(patch_tokens, patch_grid).float(),
     }
 
@@ -590,14 +645,41 @@ def main() -> None:
     if not blur_radii:
         raise ValueError("At least one blur radius is required.")
 
-    device = _device_from_config(config)
-    print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    vae_device = _resolve_runtime_device(args.vae_device)
+    patchify_device = _resolve_runtime_device(args.patchify_device)
+    vae_dtype = _resolve_runtime_dtype(
+        args.vae_dtype,
+        vae_device,
+        cpu_default=torch.float32,
+        cuda_default=torch.float16,
+    )
+    patchify_dtype = _resolve_runtime_dtype(
+        args.patchify_dtype,
+        patchify_device,
+        cpu_default=torch.float32,
+        cuda_default=torch.float16,
+    )
+
+    print(f"VAE device: {vae_device} ({vae_dtype})")
+    print(f"Patchify device: {patchify_device} ({patchify_dtype})")
     print(f"Selected images: {len(rows)}")
     print(f"Stages: {stages}")
     print(f"Methods: {methods}")
 
-    vae = load_vae(config, device)
-    model = load_sit_model(config, device)
+    vae = load_vae(config, vae_device).eval()
+    if vae_device.type == "cuda":
+        vae = vae.to(device=vae_device, dtype=vae_dtype)
+    else:
+        vae = vae.to(device=vae_device)
+
+    model = load_sit_model(config, patchify_device).eval()
+    if patchify_device.type == "cuda":
+        model = model.to(device=patchify_device, dtype=patchify_dtype)
+    else:
+        model = model.to(device=patchify_device)
 
     stem = f"clean_norm_panels_{args.subset_role}_{len(rows)}img"
     pdf_path = output_dir / f"{stem}.pdf"
@@ -610,7 +692,11 @@ def main() -> None:
         "manifest_path": str(config.manifest_path),
         "model_name": str(config.model_name),
         "checkpoint_path": config.checkpoint_path,
-        "device": str(device),
+        "device": str(_device_from_config(config)),
+        "vae_device": str(vae_device),
+        "patchify_device": str(patchify_device),
+        "vae_dtype": str(vae_dtype),
+        "patchify_dtype": str(patchify_dtype),
         "subset_role": str(args.subset_role),
         "preview_only": bool(args.preview_only),
         "max_images": int(args.max_images),
@@ -657,7 +743,10 @@ def main() -> None:
                     model=model,
                     vae=vae,
                     image_tensor=image_tensor,
-                    device=device,
+                    vae_device=vae_device,
+                    patchify_device=patchify_device,
+                    vae_dtype=vae_dtype,
+                    patchify_dtype=patchify_dtype,
                     sample_latent=bool(args.sample_latent),
                 )
                 for stage_name in stages:
@@ -673,6 +762,9 @@ def main() -> None:
                         stage_method_panels[stage_name][method].append(
                             _local_pca_rgb(transformed_tokens, grid_size=grid_size)
                         )
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             for stage_name in stages:
                 _render_stage_page(
