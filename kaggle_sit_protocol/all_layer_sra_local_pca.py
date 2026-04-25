@@ -166,10 +166,10 @@ def _collect_tokens(
         latent = latent.mul(0.18215)
 
         latent_cpu = latent.squeeze(0).detach().float().cpu()
-        x = model.x_embedder(latent) + model.pos_embed
+        layer0 = model.x_embedder(latent) + model.pos_embed
         stages: dict[str, torch.Tensor] = {
             "vae32": latent_cpu.permute(1, 2, 0).reshape(-1, latent_cpu.shape[0]),
-            "layer0_patch_embed": x.squeeze(0).detach().float().cpu(),
+            "layer0_patch_embed": layer0.squeeze(0).detach().float().cpu(),
         }
 
         t = torch.full((1,), float(timestep), device=device, dtype=dtype)
@@ -177,8 +177,8 @@ def _collect_tokens(
         c = model.t_embedder(t) + model.y_embedder(y, train=False)
 
         for layer_index, block in enumerate(model.blocks, start=1):
-            x = block(x, c)
-            stages[f"layer{layer_index:02d}"] = x.squeeze(0).detach().float().cpu()
+            layer_output = block(layer0, c)
+            stages[f"layer{layer_index:02d}"] = layer_output.squeeze(0).detach().float().cpu()
 
     return stages
 
