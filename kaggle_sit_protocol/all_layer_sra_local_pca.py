@@ -63,7 +63,7 @@ def _parse_args() -> argparse.Namespace:
         "--dtype",
         choices=("auto", "float32", "float16", "bfloat16"),
         default="auto",
-        help="Model/VAE dtype. auto uses float16 on CUDA and float32 on CPU.",
+        help="Model/VAE dtype. auto uses float32 for numerically stable PCA extraction.",
     )
     parser.add_argument("--save-tokens", action="store_true", help="Also save raw latent, patchify0, and layer token tensors as .pt files.")
     parser.add_argument("--panel-dpi", type=int, default=160)
@@ -72,7 +72,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _resolve_dtype(name: str, device: torch.device) -> torch.dtype:
     if name == "auto":
-        return torch.float16 if device.type == "cuda" else torch.float32
+        return torch.float32
     if name == "float32":
         return torch.float32
     if name == "float16":
@@ -116,7 +116,7 @@ def _select_images(config: ProtocolConfig, *, num_images: int, seed: int, shuffl
     return rows[:num_images]
 
 
-def _local_pca_rgb(tokens: torch.Tensor, grid_h: int, grid_w: int) -> np.ndarray:
+def _local_pca_rgb(tokens: torch.Tensor, grid_h: int, grid_w: int, *, stage_name: str) -> np.ndarray:
     matrix = tokens.detach().float().cpu().numpy().astype(np.float32, copy=False)
     if matrix.ndim != 2:
         raise ValueError(f"Expected [tokens, dim], got {matrix.shape}")
@@ -124,6 +124,12 @@ def _local_pca_rgb(tokens: torch.Tensor, grid_h: int, grid_w: int) -> np.ndarray
         raise ValueError(f"Grid {grid_h}x{grid_w} does not match {matrix.shape[0]} tokens")
     if min(matrix.shape) < 3:
         raise ValueError(f"Need at least 3 rows/features for PCA, got {matrix.shape}")
+    if not np.isfinite(matrix).all():
+        nonfinite_count = int((~np.isfinite(matrix)).sum())
+        raise ValueError(
+            f"{stage_name} contains {nonfinite_count} non-finite PCA inputs. "
+            "Rerun with --dtype float32, or leave --dtype unset so auto uses float32."
+        )
 
     components = PCA(n_components=3).fit_transform(matrix).astype(np.float32, copy=True)
     for channel_index in range(3):
@@ -140,7 +146,7 @@ def _local_pca_rgb(tokens: torch.Tensor, grid_h: int, grid_w: int) -> np.ndarray
 
 def _save_rgb(rgb: np.ndarray, path: Path, *, scale: int) -> None:
     array = np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
-    image = Image.fromarray(array, mode="RGB")
+    image = Image.fromarray(array)
     if scale > 1:
         image = image.resize((image.width * scale, image.height * scale), resample=Image.Resampling.NEAREST)
     image.save(path)
@@ -222,6 +228,7 @@ def main() -> None:
 
     device = torch.device(args.device)
     dtype = _resolve_dtype(args.dtype, device)
+    print(f"Using device={device}, dtype={dtype}")
 
     config = ProtocolConfig.from_kaggle_defaults()
     config.image_size = int(args.image_size)
@@ -269,7 +276,7 @@ def main() -> None:
             else:
                 grid_h, grid_w = token_grid_size(int(tokens.shape[0]))
                 scale = 16
-            rgb = _local_pca_rgb(tokens, grid_h, grid_w)
+            rgb = _local_pca_rgb(tokens, grid_h, grid_w, stage_name=stage_name)
             pca_images[stage_name] = rgb
             _save_rgb(rgb, image_dir / f"{stage_name}_sra_local_pca.png", scale=scale)
 
