@@ -24,6 +24,7 @@ try:
         _select_images,
     )
     from kaggle_sit_protocol.config import ProtocolConfig
+    from kaggle_sit_protocol.decomposition import spatial_normalize_tokens
     from kaggle_sit_protocol.modeling import load_sit_model, load_vae, preprocess_pil_image, token_grid_size
 except ImportError:
     import sys
@@ -38,6 +39,7 @@ except ImportError:
         _select_images,
     )
     from kaggle_sit_protocol.config import ProtocolConfig
+    from kaggle_sit_protocol.decomposition import spatial_normalize_tokens
     from kaggle_sit_protocol.modeling import load_sit_model, load_vae, preprocess_pil_image, token_grid_size
 
 
@@ -174,6 +176,54 @@ def _collect_tokens_from_latent(
     return stages
 
 
+def _render_stage_set(
+    *,
+    stages: dict[str, torch.Tensor],
+    source: Image.Image,
+    image_id: str,
+    level_dir: Path,
+    variant_name: str,
+    config: ProtocolConfig,
+    pdf: PdfPages,
+    panel_dpi: int,
+    apply_spatial_norm: bool,
+) -> str:
+    variant_dir = level_dir / variant_name
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
+    pca_images: dict[str, np.ndarray] = {}
+    for stage_name, tokens in stages.items():
+        if stage_name == "latent32_xt":
+            grid_h = grid_w = config.latent_size
+            scale = 8
+        else:
+            grid_h, grid_w = token_grid_size(int(tokens.shape[0]))
+            scale = 16
+        stage_tokens = (
+            spatial_normalize_tokens(
+                tokens,
+                gamma=config.spatial_norm_gamma,
+                eps=config.spatial_norm_eps,
+            )
+            if apply_spatial_norm
+            else tokens
+        )
+        rgb = _local_pca_rgb(stage_tokens, grid_h, grid_w, stage_name=f"{image_id}/{variant_name}/{stage_name}")
+        pca_images[stage_name] = rgb
+        _save_rgb(rgb, variant_dir / f"{stage_name}_sra_local_pca.png", scale=scale)
+
+    contact_sheet = variant_dir / "contact_sheet_sra_local_pca.png"
+    _render_contact_sheet(
+        source_image=source,
+        pca_images=pca_images,
+        image_id=f"{image_id} | {variant_name}",
+        output_path=contact_sheet,
+        pdf=pdf,
+        dpi=panel_dpi,
+    )
+    return str(contact_sheet)
+
+
 def main() -> None:
     args = _parse_args()
     torch.manual_seed(int(args.seed))
@@ -239,25 +289,28 @@ def main() -> None:
             dtype=dtype,
         )
 
-        pca_images: dict[str, np.ndarray] = {}
-        for stage_name, tokens in stages.items():
-            if stage_name == "latent32_xt":
-                grid_h = grid_w = config.latent_size
-                scale = 8
-            else:
-                grid_h, grid_w = token_grid_size(int(tokens.shape[0]))
-                scale = 16
-            rgb = _local_pca_rgb(tokens, grid_h, grid_w, stage_name=f"{image_id}/{stage_name}")
-            pca_images[stage_name] = rgb
-            _save_rgb(rgb, level_dir / f"{stage_name}_sra_local_pca.png", scale=scale)
-
-        _render_contact_sheet(
-            source_image=source,
-            pca_images=pca_images,
-            image_id=f"{row['image_id']} | noise={noise_level:.2f} | t={timestep:.2f}",
-            output_path=level_dir / "contact_sheet_sra_local_pca.png",
+        sheet_title = f"{row['image_id']} | noise={noise_level:.2f} | t={timestep:.2f}"
+        raw_contact_sheet = _render_stage_set(
+            stages=stages,
+            source=source,
+            image_id=sheet_title,
+            level_dir=level_dir,
+            variant_name="raw",
+            config=config,
             pdf=pdf,
-            dpi=int(args.panel_dpi),
+            panel_dpi=int(args.panel_dpi),
+            apply_spatial_norm=False,
+        )
+        spatial_norm_contact_sheet = _render_stage_set(
+            stages=stages,
+            source=source,
+            image_id=sheet_title,
+            level_dir=level_dir,
+            variant_name="spatial_norm",
+            config=config,
+            pdf=pdf,
+            panel_dpi=int(args.panel_dpi),
+            apply_spatial_norm=True,
         )
 
         if args.save_tokens:
@@ -284,7 +337,8 @@ def main() -> None:
                 "timestep": float(timestep),
                 "formula": "x_t = (1 - noise_level) * clean_latent + noise_level * gaussian_noise",
                 "level_dir": str(level_dir),
-                "contact_sheet": str(level_dir / "contact_sheet_sra_local_pca.png"),
+                "raw_contact_sheet": raw_contact_sheet,
+                "spatial_norm_contact_sheet": spatial_norm_contact_sheet,
             }
         )
 
