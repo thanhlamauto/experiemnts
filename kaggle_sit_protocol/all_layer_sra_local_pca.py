@@ -13,6 +13,7 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.backends.backend_pdf import PdfPages
 from PIL import Image
 from sklearn.decomposition import PCA
 from tqdm.auto import tqdm
@@ -67,6 +68,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--save-tokens", action="store_true", help="Also save raw latent, patchify0, and layer token tensors as .pt files.")
     parser.add_argument("--panel-dpi", type=int, default=160)
+    parser.add_argument("--pdf-path", type=str, default=None, help="Optional path for the combined contact-sheet PDF.")
     return parser.parse_args()
 
 
@@ -195,6 +197,7 @@ def _render_contact_sheet(
     pca_images: dict[str, np.ndarray],
     image_id: str,
     output_path: Path,
+    pdf: PdfPages | None,
     dpi: int,
 ) -> None:
     names = list(pca_images)
@@ -218,6 +221,8 @@ def _render_contact_sheet(
     fig.suptitle(f"{image_id} | VAE latent -> patch embed -> SiT layers | sra_local PCA-RGB", fontsize=11)
     fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight")
+    if pdf is not None:
+        pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -243,6 +248,8 @@ def main() -> None:
 
     output_dir = Path(args.output_dir) if args.output_dir else config.analysis_dir / "all_layer_sra_local_pca"
     output_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = Path(args.pdf_path) if args.pdf_path else output_dir / "all_layer_sra_local_pca_contact_sheets.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows = _select_images(config, num_images=int(args.num_images), seed=int(args.seed), shuffle=bool(args.shuffle))
 
@@ -250,6 +257,7 @@ def main() -> None:
     vae = load_vae(config, device).eval().to(device=device, dtype=dtype)
 
     metadata: list[dict[str, object]] = []
+    pdf = PdfPages(pdf_path)
     for row in tqdm(rows, desc="all-layer sra_local PCA"):
         image_dir = output_dir / row.image_id
         image_dir.mkdir(parents=True, exist_ok=True)
@@ -285,6 +293,7 @@ def main() -> None:
             pca_images=pca_images,
             image_id=row.image_id,
             output_path=image_dir / "contact_sheet_sra_local_pca.png",
+            pdf=pdf,
             dpi=int(args.panel_dpi),
         )
 
@@ -306,11 +315,13 @@ def main() -> None:
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
+    pdf.close()
 
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
 
     print(f"Wrote {len(rows)} image folders to {output_dir}")
+    print(f"Wrote combined PDF to {pdf_path}")
 
 
 if __name__ == "__main__":
